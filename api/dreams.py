@@ -92,20 +92,38 @@ async def create_dream(dream_data: CreateDreamRequest):
             if api_key:
                 headers["x-api-key"] = api_key
 
+            logger.info(f"Request headers: {list(headers.keys())}")
+            logger.info(f"Request body keys: {list(dream_data.model_dump().keys())}")
+
             async with httpx.AsyncClient() as client:
+                logger.info(f"Sending POST request to {agent_endpoint}")
                 response = await client.post(
                     agent_endpoint,
                     json=dream_data.model_dump(),
                     headers=headers,
                     timeout=30.0
                 )
+                logger.info(f"Response status code: {response.status_code}")
                 response.raise_for_status()
                 agent_response = response.json()
+                logger.info(f"Agent response received, keys: {list(agent_response.keys()) if isinstance(agent_response, dict) else 'not a dict'}")
 
             logger.info(f"Successfully posted dream to langgraph agent for thread: {thread_id}")
             return agent_response
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP Error posting to langgraph agent: {type(e).__name__}: {e}", exc_info=True)
+            if hasattr(e, 'response'):
+                logger.error(f"Response status: {e.response.status_code}")
+                try:
+                    logger.error(f"Response body: {e.response.text}")
+                except:
+                    pass
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send dream to agent: {str(e)}"
+            )
         except Exception as e:
-            logger.error(f"Error posting to langgraph agent: {e}", exc_info=True)
+            logger.error(f"Error posting to langgraph agent: {type(e).__name__}: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to send dream to agent: {str(e)}"
