@@ -37,7 +37,7 @@ class CreateDreamRequest(BaseModel):
     user_request: str = Field(..., description="The dream or goal the user wants to achieve")
     user_profile: UserProfile = Field(..., description="User profile with traits and preferences")
     research_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Research data related to the dream")
-    messages: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Message history")
+    messages: List[Dict[str, Any]] = Field(default_factory=list, description="Message history")
     roadmap: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Dream roadmap/plan")
     tracks: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Dream tracks/milestones")
     status: Optional[str] = Field(default="", description="Current status of the dream")
