@@ -37,7 +37,6 @@ class CreateDreamRequest(BaseModel):
     user_id: str = Field(..., description="Unique user identifier")
     user_request: str = Field(..., description="The dream or goal the user wants to achieve")
     user_profile: UserProfile = Field(..., description="User profile with traits and preferences")
-    assistant_id: str = Field(..., description="LangGraph assistant ID")
     research_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Research data related to the dream")
     messages: List[Dict[str, Any]] = Field(default_factory=list, description="Message history")
     roadmap: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Dream roadmap/plan")
@@ -67,7 +66,7 @@ async def create_dream(dream_data: CreateDreamRequest):
         logger.info(f"Generated thread_id: {thread_id}")
 
         # Send to langgraph agent
-        langgraph_url = os.getenv("LANGGRAPH_AGENT_URL", "https://ht-healthy-icicle-70-9182269482ef54bcb331b5ec631f931e.us.langgraph.app")
+        langgraph_url = os.getenv("LANGGRAPH_AGENT_URL")
         if not langgraph_url:
             logger.error("LANGGRAPH_AGENT_URL environment variable not set")
             raise HTTPException(
@@ -93,14 +92,27 @@ async def create_dream(dream_data: CreateDreamRequest):
             if api_key:
                 headers["x-api-key"] = api_key
 
+            # Get assistant ID from environment and add to payload
+            assistant_id = os.getenv("LANGGRAPH_ASSISTANT_ID")
+            if not assistant_id:
+                logger.error("LANGGRAPH_ASSISTANT_ID environment variable not set")
+                raise HTTPException(
+                    status_code=500,
+                    detail="LANGGRAPH_ASSISTANT_ID not configured"
+                )
+
+            # Build request payload with assistant_id injected
+            payload = dream_data.model_dump()
+            payload["assistant_id"] = assistant_id
+
             logger.info(f"Request headers: {list(headers.keys())}")
-            logger.info(f"Request body keys: {list(dream_data.model_dump().keys())}")
+            logger.info(f"Request body keys: {list(payload.keys())}")
 
             async with httpx.AsyncClient() as client:
                 logger.info(f"Sending POST request to {agent_endpoint}")
                 response = await client.post(
                     agent_endpoint,
-                    json=dream_data.model_dump(),
+                    json=payload,
                     headers=headers,
                     timeout=30.0
                 )
