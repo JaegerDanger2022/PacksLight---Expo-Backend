@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 from api.users import router as users_router
+from api.dreamsagent import router as dreams_router
 from core.database import connect_db, close_db
 
 load_dotenv()
@@ -70,6 +71,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(users_router, prefix="/api/users", tags=["users"])
+app.include_router(dreams_router, prefix="/api/dreams", tags=["dreams"])
 
 
 @app.get("/health", tags=["health"])
