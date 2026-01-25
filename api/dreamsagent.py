@@ -87,9 +87,10 @@ async def create_dream(dream_data: CreateDreamRequest):
                     detail="LANGGRAPH_API_KEY not configured"
                 )
 
-            headers = {
-                "x-api-key": api_key
-            }
+            # Build headers - API key can be passed in multiple ways
+            headers = {}
+            if api_key:
+                headers["x-api-key"] = api_key
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
