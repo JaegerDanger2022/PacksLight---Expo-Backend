@@ -100,22 +100,16 @@ async def create_dream(dream_data: CreateDreamRequest):
                     timeout=30.0
                 )
                 response.raise_for_status()
+                agent_response = response.json()
 
             logger.info(f"Successfully posted dream to langgraph agent for thread: {thread_id}")
+            return agent_response
         except Exception as e:
             logger.error(f"Error posting to langgraph agent: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to send dream to agent: {str(e)}"
             )
-
-        # Return dream with thread_id
-        return {
-            "thread_id": thread_id,
-            "user_id": dream_data.user_id,
-            "user_request": dream_data.user_request,
-            "status": "processing"
-        }
 
     except HTTPException:
         raise
