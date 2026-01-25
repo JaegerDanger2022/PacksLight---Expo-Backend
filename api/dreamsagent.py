@@ -78,10 +78,24 @@ async def create_dream(dream_data: CreateDreamRequest):
             agent_endpoint = f"{langgraph_url}/threads/{thread_id}/runs/wait"
             logger.info(f"Posting dream to langgraph agent: {agent_endpoint}")
 
+            # Get API key from environment
+            api_key = os.getenv("LANGGRAPH_API_KEY")
+            if not api_key:
+                logger.error("LANGGRAPH_API_KEY environment variable not set")
+                raise HTTPException(
+                    status_code=500,
+                    detail="LANGGRAPH_API_KEY not configured"
+                )
+
+            headers = {
+                "x-api-key": api_key
+            }
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     agent_endpoint,
                     json=dream_data.model_dump(),
+                    headers=headers,
                     timeout=30.0
                 )
                 response.raise_for_status()
