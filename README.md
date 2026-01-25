@@ -1,2 +1,2 @@
 # PacksLight---Expo-Backend
-The api backedn for the packlight demo app
+The api backend for the packlight demo app
