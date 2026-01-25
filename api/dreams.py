@@ -37,6 +37,7 @@ class CreateDreamRequest(BaseModel):
     user_id: str = Field(..., description="Unique user identifier")
     user_request: str = Field(..., description="The dream or goal the user wants to achieve")
     user_profile: UserProfile = Field(..., description="User profile with traits and preferences")
+    assistant_id: str = Field(..., description="LangGraph assistant ID")
     research_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Research data related to the dream")
     messages: List[Dict[str, Any]] = Field(default_factory=list, description="Message history")
     roadmap: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Dream roadmap/plan")
