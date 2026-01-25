@@ -66,7 +66,7 @@ async def create_dream(dream_data: CreateDreamRequest):
         logger.info(f"Generated thread_id: {thread_id}")
 
         # Send to langgraph agent
-        langgraph_url = os.getenv("LANGGRAPH_AGENT_URL")
+        langgraph_url = os.getenv("LANGGRAPH_AGENT_URL", "https://ht-healthy-icicle-70-9182269482ef54bcb331b5ec631f931e.us.langgraph.app")
         if not langgraph_url:
             logger.error("LANGGRAPH_AGENT_URL environment variable not set")
             raise HTTPException(
