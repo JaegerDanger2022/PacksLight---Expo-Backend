@@ -3,6 +3,7 @@ Users API endpoints - Retrieve and create user data from MongoDB
 """
 
 import logging
+import base64
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
@@ -57,6 +58,15 @@ async def get_user(user_id: str):
         # Convert ObjectId to string for JSON serialization
         if "_id" in user:
             user["_id"] = str(user["_id"])
+
+        # Convert image bytes to base64 for JSON serialization and frontend consumption
+        if "dreams" in user and isinstance(user["dreams"], list):
+            for dream in user["dreams"]:
+                if isinstance(dream, dict) and "dream_image_bytes" in dream:
+                    image_bytes = dream["dream_image_bytes"]
+                    if isinstance(image_bytes, bytes):
+                        # Convert binary bytes to base64 string
+                        dream["dream_image_bytes"] = base64.b64encode(image_bytes).decode('utf-8')
 
         logger.info(f"Successfully retrieved user: {user_id}")
         return user
