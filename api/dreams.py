@@ -118,10 +118,13 @@ async def create_dream(dream_data: CreateDreamRequest):
                 run_endpoint = f"{langgraph_url}/threads/{thread_id}/runs/wait"
                 logger.info(f"Sending run to: {run_endpoint}")
 
-                # Build payload with input wrapper
+                # Build payload with input wrapper - add thread_id to dream data
+                dream_input = dream_data.model_dump()
+                dream_input["thread_id"] = thread_id
+
                 run_payload = {
                     "assistant_id": assistant_id,
-                    "input": dream_data.model_dump()
+                    "input": dream_input
                 }
 
                 logger.info(f"Run payload structure: assistant_id + input with keys: {list(run_payload['input'].keys())}")
