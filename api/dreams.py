@@ -61,11 +61,7 @@ async def create_dream(dream_data: CreateDreamRequest):
     try:
         logger.info(f"Processing dream for user: {dream_data.user_id}")
 
-        # Generate thread_id for langgraph
-        thread_id = str(uuid.uuid4())
-        logger.info(f"Generated thread_id: {thread_id}")
-
-        # Send to langgraph agent
+        # Get environment variables
         langgraph_url = os.getenv("LANGGRAPH_AGENT_URL")
         if not langgraph_url:
             logger.error("LANGGRAPH_AGENT_URL environment variable not set")
@@ -74,57 +70,78 @@ async def create_dream(dream_data: CreateDreamRequest):
                 detail="LANGGRAPH_AGENT_URL not configured"
             )
 
+        api_key = os.getenv("LANGGRAPH_API_KEY")
+        if not api_key:
+            logger.error("LANGGRAPH_API_KEY environment variable not set")
+            raise HTTPException(
+                status_code=500,
+                detail="LANGGRAPH_API_KEY not configured"
+            )
+
+        assistant_id = os.getenv("LANGGRAPH_ASSISTANT_ID")
+        if not assistant_id:
+            logger.error("LANGGRAPH_ASSISTANT_ID environment variable not set")
+            raise HTTPException(
+                status_code=500,
+                detail="LANGGRAPH_ASSISTANT_ID not configured"
+            )
+
+        # Build headers with API key
+        headers = {"x-api-key": api_key}
+
         try:
-            agent_endpoint = f"{langgraph_url}/threads/{thread_id}/runs/wait"
-            logger.info(f"Posting dream to langgraph agent: {agent_endpoint}")
-
-            # Get API key from environment
-            api_key = os.getenv("LANGGRAPH_API_KEY")
-            if not api_key:
-                logger.error("LANGGRAPH_API_KEY environment variable not set")
-                raise HTTPException(
-                    status_code=500,
-                    detail="LANGGRAPH_API_KEY not configured"
-                )
-
-            # Build headers - API key can be passed in multiple ways
-            headers = {}
-            if api_key:
-                headers["x-api-key"] = api_key
-
-            # Get assistant ID from environment and add to payload
-            assistant_id = os.getenv("LANGGRAPH_ASSISTANT_ID")
-            if not assistant_id:
-                logger.error("LANGGRAPH_ASSISTANT_ID environment variable not set")
-                raise HTTPException(
-                    status_code=500,
-                    detail="LANGGRAPH_ASSISTANT_ID not configured"
-                )
-
-            # Build request payload with assistant_id injected
-            payload = dream_data.model_dump()
-            payload["assistant_id"] = assistant_id
-
-            logger.info(f"Request headers: {list(headers.keys())}")
-            logger.info(f"Request body keys: {list(payload.keys())}")
-
             async with httpx.AsyncClient() as client:
-                logger.info(f"Sending POST request to {agent_endpoint}")
-                response = await client.post(
-                    agent_endpoint,
-                    json=payload,
+                # Step 1: Create a thread
+                create_thread_url = f"{langgraph_url}/threads"
+                logger.info(f"Creating thread at: {create_thread_url}")
+
+                thread_response = await client.post(
+                    create_thread_url,
+                    json={},
                     headers=headers,
                     timeout=30.0
                 )
-                logger.info(f"Response status code: {response.status_code}")
-                response.raise_for_status()
-                agent_response = response.json()
+                logger.info(f"Thread creation response status: {thread_response.status_code}")
+                thread_response.raise_for_status()
+                thread_data = thread_response.json()
+                thread_id = thread_data.get("thread_id")
+                logger.info(f"Created thread_id: {thread_id}")
+
+                if not thread_id:
+                    logger.error("No thread_id in response from /threads endpoint")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to create thread"
+                    )
+
+                # Step 2: Send run to the thread with correct payload structure
+                run_endpoint = f"{langgraph_url}/threads/{thread_id}/runs/wait"
+                logger.info(f"Sending run to: {run_endpoint}")
+
+                # Build payload with input wrapper
+                run_payload = {
+                    "assistant_id": assistant_id,
+                    "input": dream_data.model_dump()
+                }
+
+                logger.info(f"Run payload structure: assistant_id + input with keys: {list(run_payload['input'].keys())}")
+
+                run_response = await client.post(
+                    run_endpoint,
+                    json=run_payload,
+                    headers=headers,
+                    timeout=30.0
+                )
+                logger.info(f"Run response status code: {run_response.status_code}")
+                run_response.raise_for_status()
+                agent_response = run_response.json()
                 logger.info(f"Agent response received, keys: {list(agent_response.keys()) if isinstance(agent_response, dict) else 'not a dict'}")
 
-            logger.info(f"Successfully posted dream to langgraph agent for thread: {thread_id}")
-            return agent_response
+                logger.info(f"Successfully processed dream for thread: {thread_id}")
+                return agent_response
+
         except httpx.HTTPError as e:
-            logger.error(f"HTTP Error posting to langgraph agent: {type(e).__name__}: {e}", exc_info=True)
+            logger.error(f"HTTP Error in langgraph call: {type(e).__name__}: {e}", exc_info=True)
             if hasattr(e, 'response'):
                 logger.error(f"Response status: {e.response.status_code}")
                 try:
@@ -133,13 +150,13 @@ async def create_dream(dream_data: CreateDreamRequest):
                     pass
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to send dream to agent: {str(e)}"
+                detail=f"Failed to process dream: {str(e)}"
             )
         except Exception as e:
-            logger.error(f"Error posting to langgraph agent: {type(e).__name__}: {e}", exc_info=True)
+            logger.error(f"Error processing dream: {type(e).__name__}: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to send dream to agent: {str(e)}"
+                detail=f"Failed to process dream: {str(e)}"
             )
 
     except HTTPException:
