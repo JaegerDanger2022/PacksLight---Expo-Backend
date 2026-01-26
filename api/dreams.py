@@ -138,6 +138,17 @@ async def create_dream(dream_data: CreateDreamRequest):
                 logger.info(f"Agent response received, keys: {list(agent_response.keys()) if isinstance(agent_response, dict) else 'not a dict'}")
 
                 logger.info(f"Successfully processed dream for thread: {thread_id}")
+
+                # Add thread_id to response
+                if isinstance(agent_response, dict):
+                    agent_response["thread_id"] = thread_id
+                else:
+                    # If response is not a dict, wrap it
+                    agent_response = {
+                        "thread_id": thread_id,
+                        "response": agent_response
+                    }
+
                 return agent_response
 
         except httpx.HTTPError as e:
