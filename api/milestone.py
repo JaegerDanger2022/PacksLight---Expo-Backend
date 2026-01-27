@@ -124,33 +124,37 @@ async def update_milestone_status(
             None
         )
 
-        # Update user's metadata.score with milestone xp_points
+        # Update dream's metadata.score with milestone xp_points
         xp_points = updated_milestone.get("xp_points", 0)
 
-        if xp_points > 0:
-            # Check if metadata.score exists
-            user_metadata = verify_doc.get("metadata", {})
-            current_score = user_metadata.get("score", None)
+        if xp_points > 0 and updated_dream:
+            # Check if dream metadata.score exists
+            dream_metadata = updated_dream.get("metadata", {})
+            current_score = dream_metadata.get("score", None)
 
             if current_score is None:
                 # Score doesn't exist, set it to xp_points (don't increment)
                 new_score = xp_points
-                logger.info(f"Creating metadata.score with value {xp_points}")
+                logger.info(f"Creating dream metadata.score with value {xp_points}")
             else:
                 # Score exists, increment it
                 new_score = current_score + xp_points
-                logger.info(f"Incrementing metadata.score from {current_score} to {new_score}")
+                logger.info(f"Incrementing dream metadata.score from {current_score} to {new_score}")
 
-            # Update the user's metadata.score
+            # Update the dream's metadata.score
             await db.users.update_one(
                 {
-                    "user_id": user_id
+                    "user_id": user_id,
+                    "dreams.thread_id": thread_id
                 },
                 {
                     "$set": {
-                        "metadata.score": new_score
+                        "dreams.$[d].metadata.score": new_score
                     }
-                }
+                },
+                array_filters=[
+                    {"d.thread_id": thread_id}
+                ]
             )
 
         logger.info(f"Successfully updated milestone {milestone_id} to status: {update_data.status}")
