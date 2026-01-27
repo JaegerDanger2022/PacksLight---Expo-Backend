@@ -51,13 +51,46 @@ async def update_milestone_status(
 
         logger.info(f"Updating milestone {milestone_id} in dream {thread_id} for user {user_id} to status: {update_data.status}")
 
-        # Update the milestone status using array filters
-        # This uses $set to update ONLY the status field, preserving all other milestone data
-        result = await db.users.find_one_and_update(
+        # First verify the document exists
+        verify_doc = await db.users.find_one(
             {
                 "user_id": user_id,
-                "dreams.thread_id": thread_id,
-                "dreams.roadmap.milestones.id": milestone_id
+                "dreams.thread_id": thread_id
+            }
+        )
+
+        if not verify_doc:
+            logger.warning(f"User {user_id} with dream {thread_id} not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User or dream not found"
+            )
+
+        # Verify milestone exists in the dream
+        milestone_found = False
+        for dream in verify_doc.get("dreams", []):
+            if dream.get("thread_id") == thread_id:
+                for milestone in dream.get("roadmap", {}).get("milestones", []):
+                    if milestone.get("id") == milestone_id:
+                        milestone_found = True
+                        break
+                break
+
+        if not milestone_found:
+            logger.warning(f"Milestone {milestone_id} not found in dream {thread_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Milestone not found"
+            )
+
+        logger.info(f"Found user, dream, and milestone. Proceeding with update.")
+
+        # Update the milestone status using array filters
+        # This uses $set to update ONLY the status field, preserving all other milestone data
+        # Only query by user_id - the array filters will handle the nested matching
+        result = await db.users.find_one_and_update(
+            {
+                "user_id": user_id
             },
             {
                 "$set": {
@@ -72,10 +105,10 @@ async def update_milestone_status(
         )
 
         if not result:
-            logger.warning(f"Could not find user {user_id}, dream {thread_id}, or milestone {milestone_id}")
+            logger.error(f"Failed to update milestone despite verification passing")
             raise HTTPException(
-                status_code=404,
-                detail=f"User, dream, or milestone not found"
+                status_code=500,
+                detail=f"Failed to update milestone"
             )
 
         # Find the updated milestone from the result
