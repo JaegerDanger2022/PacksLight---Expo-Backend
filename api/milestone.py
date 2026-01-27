@@ -51,58 +51,13 @@ async def update_milestone_status(
 
         logger.info(f"Updating milestone {milestone_id} in dream {thread_id} for user {user_id} to status: {update_data.status}")
 
-        # Find the user document by user_id
-        user_doc = await db.users.find_one(
-            {
-                "user_id": user_id
-            }
-        )
-
-        if not user_doc:
-            logger.warning(f"User {user_id} not found")
-            raise HTTPException(
-                status_code=404,
-                detail=f"User {user_id} not found"
-            )
-
-        # Find the specific dream in the dreams array by thread_id
-        dream = None
-        for d in user_doc.get("dreams", []):
-            if d.get("thread_id") == thread_id:
-                dream = d
-                break
-
-        if not dream:
-            logger.warning(f"Dream with thread_id {thread_id} not found for user {user_id}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"Dream with thread_id {thread_id} not found"
-            )
-
-        logger.info(f"Found dream with thread_id {thread_id}")
-
-        # Check if milestone exists in the dream
-        milestone = None
-        for m in dream.get("roadmap", {}).get("milestones", []):
-            if m.get("id") == milestone_id:
-                milestone = m
-                break
-
-        if not milestone:
-            logger.warning(f"Milestone {milestone_id} not found in dream {thread_id}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"Milestone with ID {milestone_id} not found in dream {thread_id}"
-            )
-
-        logger.info(f"Found milestone {milestone_id}, current status: {milestone.get('status')}")
-
-        # Now update the milestone status using array filters
+        # Update the milestone status using array filters
         # This uses $set to update ONLY the status field, preserving all other milestone data
         result = await db.users.find_one_and_update(
             {
                 "user_id": user_id,
-                "dreams.thread_id": thread_id
+                "dreams.thread_id": thread_id,
+                "dreams.roadmap.milestones.id": milestone_id
             },
             {
                 "$set": {
@@ -117,10 +72,10 @@ async def update_milestone_status(
         )
 
         if not result:
-            logger.error(f"Failed to update milestone {milestone_id} in dream {thread_id}")
+            logger.warning(f"Could not find user {user_id}, dream {thread_id}, or milestone {milestone_id}")
             raise HTTPException(
-                status_code=500,
-                detail="Failed to update milestone"
+                status_code=404,
+                detail=f"User, dream, or milestone not found"
             )
 
         # Find the updated milestone from the result
