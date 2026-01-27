@@ -158,7 +158,7 @@ async def update_milestone_status(
         return {
             "success": True,
             "message": f"Milestone {milestone_id} status updated to {update_data.status}",
-            "milestone": updated_milestone
+        
         }
 
     except HTTPException:
