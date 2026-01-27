@@ -17,8 +17,9 @@ class UpdateMilestoneRequest(BaseModel):
     status: str = Field(..., description="New status for the milestone (e.g., 'completed', 'pending', 'in_progress')")
 
 
-@router.put("/update-status/{thread_id}/{milestone_id}", status_code=200, tags=["milestone"])
+@router.put("/update-status/{user_id}/{thread_id}/{milestone_id}", status_code=200, tags=["milestone"])
 async def update_milestone_status(
+    user_id: str,
     thread_id: str,
     milestone_id: str,
     update_data: UpdateMilestoneRequest
@@ -27,6 +28,7 @@ async def update_milestone_status(
     Update a milestone's status in a dream.
 
     Args:
+        user_id: The user ID who owns the dream
         thread_id: The thread ID of the dream containing the milestone
         milestone_id: The ID of the milestone to update
         update_data: Request body containing the new status
@@ -35,7 +37,7 @@ async def update_milestone_status(
         dict: Updated milestone data with the new status
 
     Raises:
-        404: Dream or milestone not found
+        404: User, dream, or milestone not found
         500: Database error
     """
     try:
@@ -47,52 +49,44 @@ async def update_milestone_status(
                 detail="Database connection not available"
             )
 
-        logger.info(f"Updating milestone {milestone_id} in dream {thread_id} to status: {update_data.status}")
+        logger.info(f"Updating milestone {milestone_id} in dream {thread_id} for user {user_id} to status: {update_data.status}")
 
-        # First, find the dream with the given thread_id using aggregation
-        pipeline = [
+        # Find the user document by user_id
+        user_doc = await db.users.find_one(
             {
-                "$match": {
-                    "dreams.thread_id": thread_id
-                }
-            },
-            {
-                "$project": {
-                    "dreams": {
-                        "$filter": {
-                            "input": "$dreams",
-                            "as": "dream",
-                            "cond": {"$eq": ["$$dream.thread_id", thread_id]}
-                        }
-                    }
-                }
+                "user_id": user_id
             }
-        ]
-
-        user_doc = await db.users.aggregate(pipeline).to_list(1)
+        )
 
         if not user_doc:
-            logger.warning(f"Dream with thread_id {thread_id} not found")
+            logger.warning(f"User {user_id} not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User {user_id} not found"
+            )
+
+        # Find the specific dream in the dreams array by thread_id
+        dream = None
+        for d in user_doc.get("dreams", []):
+            if d.get("thread_id") == thread_id:
+                dream = d
+                break
+
+        if not dream:
+            logger.warning(f"Dream with thread_id {thread_id} not found for user {user_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"Dream with thread_id {thread_id} not found"
             )
 
-        dream_data = user_doc[0].get("dreams", [])
-        if not dream_data:
-            logger.warning(f"No dreams found with thread_id {thread_id}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"Dream with thread_id {thread_id} not found"
-            )
+        logger.info(f"Found dream with thread_id {thread_id}")
 
         # Check if milestone exists in the dream
-        dream = dream_data[0]
-        milestone = next(
-            (m for m in dream.get("roadmap", {}).get("milestones", [])
-             if m.get("id") == milestone_id),
-            None
-        )
+        milestone = None
+        for m in dream.get("roadmap", {}).get("milestones", []):
+            if m.get("id") == milestone_id:
+                milestone = m
+                break
 
         if not milestone:
             logger.warning(f"Milestone {milestone_id} not found in dream {thread_id}")
@@ -101,10 +95,13 @@ async def update_milestone_status(
                 detail=f"Milestone with ID {milestone_id} not found in dream {thread_id}"
             )
 
+        logger.info(f"Found milestone {milestone_id}, current status: {milestone.get('status')}")
+
         # Now update the milestone status using array filters
         # This uses $set to update ONLY the status field, preserving all other milestone data
         result = await db.users.find_one_and_update(
             {
+                "user_id": user_id,
                 "dreams.thread_id": thread_id
             },
             {
