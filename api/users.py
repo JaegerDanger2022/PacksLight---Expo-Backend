@@ -22,6 +22,11 @@ class CreateUserRequest(BaseModel):
     lastname: str = Field(..., description="User last name")
 
 
+class UpdateRecentsRequest(BaseModel):
+    """Request schema for updating user's recents array"""
+    thread_id: str = Field(..., description="Dream thread ID to add to recents")
+
+
 @router.get("/{user_id}", tags=["users"])
 async def get_user(user_id: str):
     """
@@ -144,4 +149,115 @@ async def register_user(user_data: CreateUserRequest):
         raise HTTPException(
             status_code=500,
             detail="Internal server error while creating user"
+        )
+
+
+@router.put("/{user_id}/recents", status_code=200, tags=["users"])
+async def update_recents(user_id: str, update_data: UpdateRecentsRequest):
+    """
+    Update the user's recents array with a newly accessed dream.
+
+    Args:
+        user_id: The user's unique identifier (Firebase UID)
+        update_data: Request body containing thread_id of the dream
+
+    Returns:
+        dict: Success status, message, and updated recents array
+
+    Raises:
+        400: Dream is not active
+        404: User or dream not found
+        500: Database error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database not connected")
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        thread_id = update_data.thread_id
+
+        logger.info(f"Updating recents for user {user_id} with thread_id: {thread_id}")
+
+        # Validate input
+        if not thread_id:
+            logger.warning(f"Missing thread_id for user {user_id}")
+            raise HTTPException(
+                status_code=400,
+                detail="thread_id is required"
+            )
+
+        # Find user
+        user = await db.users.find_one({"user_id": user_id})
+        if user is None:
+            logger.warning(f"User not found: {user_id}")
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # Find dream by thread_id
+        dream = None
+        if "dreams" in user and isinstance(user["dreams"], list):
+            for d in user["dreams"]:
+                if isinstance(d, dict) and d.get("thread_id") == thread_id:
+                    dream = d
+                    break
+
+        if dream is None:
+            logger.warning(f"Dream not found: {thread_id} for user {user_id}")
+            raise HTTPException(
+                status_code=404,
+                detail="Dream not found"
+            )
+
+        # Check if dream is active
+        if dream.get("status") != "active":
+            logger.warning(f"Dream is not active: {thread_id} (status: {dream.get('status')})")
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot add inactive dream to recents"
+            )
+
+        # Update recents array
+        recents = user.get("recents", [])
+        if not isinstance(recents, list):
+            recents = []
+
+        # Remove thread_id if it already exists
+        recents = [id for id in recents if id != thread_id]
+
+        # Add thread_id to the front
+        recents.insert(0, thread_id)
+
+        # Keep only first 3 items
+        recents = recents[:3]
+
+        # Update user document with new recents array and updated_at timestamp
+        await db.users.find_one_and_update(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "recents": recents,
+                    "updated_at": datetime.now(timezone.utc)
+                }
+            },
+            return_document=True
+        )
+
+        logger.info(f"Successfully updated recents for user {user_id}: {recents}")
+
+        return {
+            "success": True,
+            "message": "Recents updated successfully",
+            "recents": recents
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating recents for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while updating recents"
         )
