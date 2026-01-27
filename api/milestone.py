@@ -42,7 +42,7 @@ async def update_milestone_status(
     """
     try:
         db = get_db()
-        if not db:
+        if db is None:
             logger.error("Database connection not available")
             raise HTTPException(
                 status_code=500,
