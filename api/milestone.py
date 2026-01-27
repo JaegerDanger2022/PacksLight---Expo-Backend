@@ -5,8 +5,6 @@ Milestone API endpoints - Update and manage milestones in roadmaps
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional
-from bson import ObjectId
 from core.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -19,17 +17,17 @@ class UpdateMilestoneRequest(BaseModel):
     status: str = Field(..., description="New status for the milestone (e.g., 'completed', 'pending', 'in_progress')")
 
 
-@router.put("/update-status/{roadmap_id}/{milestone_id}", status_code=200, tags=["milestone"])
+@router.put("/update-status/{thread_id}/{milestone_id}", status_code=200, tags=["milestone"])
 async def update_milestone_status(
-    roadmap_id: str,
+    thread_id: str,
     milestone_id: str,
     update_data: UpdateMilestoneRequest
 ):
     """
-    Update a milestone's status in a roadmap.
+    Update a milestone's status in a dream.
 
     Args:
-        roadmap_id: The ID of the roadmap containing the milestone
+        thread_id: The thread ID of the dream containing the milestone
         milestone_id: The ID of the milestone to update
         update_data: Request body containing the new status
 
@@ -37,7 +35,7 @@ async def update_milestone_status(
         dict: Updated milestone data with the new status
 
     Raises:
-        404: Roadmap or milestone not found
+        404: Dream or milestone not found
         500: Database error
     """
     try:
@@ -49,21 +47,13 @@ async def update_milestone_status(
                 detail="Database connection not available"
             )
 
-        # Try to parse roadmap_id as ObjectId if it looks like MongoDB ID
-        try:
-            if len(roadmap_id) == 24:
-                query_roadmap_id = ObjectId(roadmap_id)
-            else:
-                query_roadmap_id = roadmap_id
-        except Exception:
-            query_roadmap_id = roadmap_id
+        logger.info(f"Updating milestone {milestone_id} in dream {thread_id} to status: {update_data.status}")
 
-        logger.info(f"Updating milestone {milestone_id} in roadmap {roadmap_id} to status: {update_data.status}")
-
-        # Find the roadmap and update the milestone within it
+        # Update the milestone status using array filters to target the specific milestone
+        # This uses $set to update ONLY the status field, preserving all other milestone data
         result = await db.users.find_one_and_update(
             {
-                "dreams.roadmap._id": query_roadmap_id
+                "dreams.thread_id": thread_id
             },
             {
                 "$set": {
@@ -71,31 +61,31 @@ async def update_milestone_status(
                 }
             },
             array_filters=[
-                {"d.roadmap._id": query_roadmap_id},
+                {"d.thread_id": thread_id},
                 {"m.id": milestone_id}
             ],
             return_document=True
         )
 
         if not result:
-            logger.warning(f"Roadmap {roadmap_id} not found for update")
+            logger.warning(f"Dream with thread_id {thread_id} not found for update")
             raise HTTPException(
                 status_code=404,
-                detail=f"Roadmap with ID {roadmap_id} not found"
+                detail=f"Dream with thread_id {thread_id} not found"
             )
 
         # Find and return the updated milestone
         dream_data = next(
             (dream for dream in result.get("dreams", [])
-             if dream.get("roadmap", {}).get("_id") == query_roadmap_id),
+             if dream.get("thread_id") == thread_id),
             None
         )
 
         if not dream_data:
-            logger.warning(f"Could not find dream with roadmap {roadmap_id} in result")
+            logger.warning(f"Could not find dream with thread_id {thread_id} in result")
             raise HTTPException(
                 status_code=404,
-                detail=f"Dream with roadmap {roadmap_id} not found"
+                detail=f"Dream with thread_id {thread_id} not found"
             )
 
         milestone = next(
@@ -105,10 +95,10 @@ async def update_milestone_status(
         )
 
         if not milestone:
-            logger.warning(f"Milestone {milestone_id} not found in roadmap {roadmap_id}")
+            logger.warning(f"Milestone {milestone_id} not found in dream {thread_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Milestone with ID {milestone_id} not found in roadmap {roadmap_id}"
+                detail=f"Milestone with ID {milestone_id} not found in dream {thread_id}"
             )
 
         logger.info(f"Successfully updated milestone {milestone_id} to status: {update_data.status}")
