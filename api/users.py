@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 from core.database import get_db
-from dateutil import parser as date_parser
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +413,9 @@ async def update_streak(user_id: str, update_data: UpdateStreakRequest):
 
         # Parse completion_date
         try:
-            completion_dt = date_parser.isoparse(update_data.completion_date)
+            # Handle ISO 8601 format by replacing Z with +00:00 for fromisoformat compatibility
+            iso_string = update_data.completion_date.replace('Z', '+00:00')
+            completion_dt = datetime.fromisoformat(iso_string)
         except (ValueError, TypeError):
             raise HTTPException(
                 status_code=400,
@@ -465,7 +466,8 @@ async def update_streak(user_id: str, update_data: UpdateStreakRequest):
         else:
             # Parse last_completion if it's a string
             if isinstance(last_completion, str):
-                last_completion_dt = date_parser.isoparse(last_completion)
+                iso_string = last_completion.replace('Z', '+00:00')
+                last_completion_dt = datetime.fromisoformat(iso_string)
             else:
                 last_completion_dt = last_completion
 
