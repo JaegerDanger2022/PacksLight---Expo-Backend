@@ -164,6 +164,7 @@ async def update_milestone_status(
             }
             if is_complete:
                 update_dream_fields["dreams.$[d].isComplete"] = True
+                update_dream_fields["dreams.$[d].completed_at"] = datetime.now(timezone.utc).isoformat()
                 logger.info(f"Dream {thread_id} is now complete!")
 
             await db.users.update_one(
@@ -181,11 +182,24 @@ async def update_milestone_status(
 
         logger.info(f"Successfully updated milestone {milestone_id} to status: {update_data.status}")
 
-        return {
+        response = {
             "success": True,
             "message": f"Milestone {milestone_id} status updated to {update_data.status}",
-        
         }
+
+        # Add isComplete to response if dream is complete
+        if xp_points > 0 and updated_dream:
+            # Recalculate is_complete for response
+            total_xp = sum(
+                m.get("xp_points", 0) for m in updated_dream.get("roadmap", {}).get("milestones", [])
+            )
+            dream_metadata = updated_dream.get("metadata", {})
+            current_score = dream_metadata.get("score", 0)
+            new_score = current_score + xp_points
+            is_complete_response = new_score == total_xp
+            response["isComplete"] = is_complete_response
+
+        return response
 
     except HTTPException:
         raise
