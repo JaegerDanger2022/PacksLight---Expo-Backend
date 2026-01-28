@@ -27,6 +27,24 @@ class UpdateRecentsRequest(BaseModel):
     thread_id: str = Field(..., description="Dream thread ID to add to recents")
 
 
+class UpNextData(BaseModel):
+    """Schema for up_next milestone data"""
+    milestone_id: str = Field(..., description="Unique milestone identifier")
+    milestone_title: str = Field(..., description="Title of the milestone")
+    dream_thread_id: str = Field(..., description="Thread ID of the dream containing the milestone")
+    dream_title: str = Field(..., description="Title of the dream")
+    time_estimate: str = Field(..., description="Estimated time to complete (e.g., '20 mins', '1 hour')")
+    xp_points: int = Field(..., description="XP points awarded for completing the milestone", ge=0)
+    challenge_type: str = Field(..., description="Type of challenge (e.g., 'power_move', 'knowledge_quest')")
+    streak_eligible: bool = Field(..., description="Whether this milestone is eligible for streak")
+    updated_at: str = Field(..., description="ISO 8601 timestamp when up_next was updated")
+
+
+class UpdateUpNextRequest(BaseModel):
+    """Request schema for updating user's up_next field"""
+    up_next: UpNextData | None = Field(..., description="Next milestone data or null to clear")
+
+
 @router.get("/{user_id}", tags=["users"])
 async def get_user(user_id: str):
     """
@@ -260,4 +278,89 @@ async def update_recents(user_id: str, update_data: UpdateRecentsRequest):
         raise HTTPException(
             status_code=500,
             detail="Internal server error while updating recents"
+        )
+
+
+@router.put("/{user_id}/up_next", status_code=200, tags=["users"])
+async def update_up_next(user_id: str, update_data: UpdateUpNextRequest):
+    """
+    Update the user's up_next field with the next incomplete milestone.
+
+    The frontend calculates which milestone should be "next up" and sends it to
+    the backend for persistence. This endpoint stores the milestone data as-is.
+
+    Args:
+        user_id: The user's unique identifier (Firebase UID)
+        update_data: Request body containing up_next milestone data or null
+
+    Returns:
+        dict: Success status, message, and the up_next data that was stored
+
+    Raises:
+        404: User not found
+        500: Database error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database not connected")
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        up_next_value = update_data.up_next
+
+        if up_next_value is None:
+            logger.info(f"Clearing up_next for user {user_id} (no incomplete milestones)")
+        else:
+            logger.info(f"Updating up_next for user {user_id} to milestone {up_next_value.milestone_id}")
+
+        # Find user
+        user = await db.users.find_one({"user_id": user_id})
+        if user is None:
+            logger.warning(f"User not found: {user_id}")
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # Prepare up_next data for storage
+        if up_next_value is None:
+            up_next_to_store = None
+        else:
+            # Convert the up_next data to a dictionary for storage
+            up_next_to_store = up_next_value.model_dump()
+
+        # Update user document with new up_next
+        await db.users.find_one_and_update(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "up_next": up_next_to_store
+                }
+            },
+            return_document=True
+        )
+
+        # Prepare response
+        if up_next_value is None:
+            logger.warning(f"User {user_id} updated up_next to null (no incomplete milestones)")
+            return {
+                "success": True,
+                "message": "Up next cleared - no incomplete milestones found",
+                "up_next": None
+            }
+        else:
+            logger.info(f"Successfully updated up_next for user {user_id} to milestone {up_next_value.milestone_id}")
+            return {
+                "success": True,
+                "message": "Up next updated successfully",
+                "up_next": up_next_to_store
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating up_next for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while updating up_next"
         )
