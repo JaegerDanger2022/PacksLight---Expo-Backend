@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 from core.database import get_db
+from dateutil import parser as date_parser
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,13 @@ class UpNextData(BaseModel):
 class UpdateUpNextRequest(BaseModel):
     """Request schema for updating user's up_next field"""
     up_next: UpNextData | None = Field(..., description="Next milestone data or null to clear")
+
+
+class UpdateStreakRequest(BaseModel):
+    """Request schema for updating user's streak after milestone completion"""
+    milestone_id: str = Field(..., description="The ID of the milestone being completed")
+    completion_date: str = Field(..., description="ISO 8601 timestamp of milestone completion")
+    is_streak_eligible: bool = Field(..., description="Whether this milestone counts toward streak")
 
 
 @router.get("/{user_id}", tags=["users"])
@@ -363,4 +371,206 @@ async def update_up_next(user_id: str, update_data: UpdateUpNextRequest):
         raise HTTPException(
             status_code=500,
             detail="Internal server error while updating up_next"
+        )
+
+
+@router.put("/{user_id}/streak/update", status_code=200, tags=["users"])
+async def update_streak(user_id: str, update_data: UpdateStreakRequest):
+    """
+    Update the user's streak data after a milestone completion.
+
+    Calculates streak continuation, checks for achievement milestones (3-day, 7-day, 30-day),
+    and returns updated streak information for frontend notifications and modals.
+
+    Args:
+        user_id: The user's unique identifier (Firebase UID)
+        update_data: Milestone completion data including completion_date
+
+    Returns:
+        dict: Success status, streak data, and achievement information
+
+    Raises:
+        400: Invalid request body or future completion_date
+        404: User not found
+        500: Database error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database not connected")
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        # Validate required fields
+        if not update_data.milestone_id:
+            raise HTTPException(
+                status_code=400,
+                detail="milestone_id is required"
+            )
+        if not update_data.completion_date:
+            raise HTTPException(
+                status_code=400,
+                detail="completion_date is required"
+            )
+
+        # Parse completion_date
+        try:
+            completion_dt = date_parser.isoparse(update_data.completion_date)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid ISO 8601 timestamp format for completion_date"
+            )
+
+        # Validate completion_date is not in the future
+        now_utc = datetime.now(timezone.utc)
+        if completion_dt > now_utc:
+            logger.warning(f"User {user_id} submitted future completion_date: {completion_dt}")
+            raise HTTPException(
+                status_code=400,
+                detail="completion_date cannot be in the future"
+            )
+
+        logger.info(f"Updating streak for user {user_id} with milestone {update_data.milestone_id}")
+
+        # Find user
+        user = await db.users.find_one({"user_id": user_id})
+        if user is None:
+            logger.warning(f"User not found: {user_id}")
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # Initialize streak if missing
+        streak = user.get("streak")
+        if not streak:
+            streak = {
+                "current_streak": 0,
+                "longest_streak": 0,
+                "last_completion_date": None,
+                "total_completions": 0,
+                "streak_freeze_available": False,
+                "milestone_achievements": {
+                    "three_day_count": 0,
+                    "seven_day_count": 0,
+                    "thirty_day_count": 0
+                }
+            }
+
+        # Calculate days since last completion
+        last_completion = streak.get("last_completion_date")
+
+        if last_completion is None:
+            days_diff = float('inf')  # First completion ever
+        else:
+            # Parse last_completion if it's a string
+            if isinstance(last_completion, str):
+                last_completion_dt = date_parser.isoparse(last_completion)
+            else:
+                last_completion_dt = last_completion
+
+            today = completion_dt.date()
+            last_date = last_completion_dt.date()
+            days_diff = (today - last_date).days
+
+        streak_increased = False
+        streak_broken = False
+        milestone_achieved = None
+
+        if days_diff == 0:
+            # Same day - increment completion counter but don't change streak
+            streak["total_completions"] += 1
+            streak["last_completion_date"] = completion_dt.isoformat()
+
+        elif days_diff == 1 or days_diff == float('inf'):
+            # Next day or first completion - extend streak
+            streak["current_streak"] += 1
+            streak["total_completions"] += 1
+            streak["last_completion_date"] = completion_dt.isoformat()
+
+            # Update longest streak if current exceeds it
+            if streak["current_streak"] > streak["longest_streak"]:
+                streak["longest_streak"] = streak["current_streak"]
+
+            streak_increased = True
+
+            # Check for achievement milestones
+            if streak["current_streak"] == 3:
+                streak["milestone_achievements"]["three_day_count"] += 1
+                milestone_achieved = "3_day"
+            elif streak["current_streak"] == 7:
+                streak["milestone_achievements"]["seven_day_count"] += 1
+                milestone_achieved = "7_day"
+            elif streak["current_streak"] == 30:
+                streak["milestone_achievements"]["thirty_day_count"] += 1
+                milestone_achieved = "30_day"
+
+        elif days_diff > 1:
+            # Missed one or more days
+            if streak.get("streak_freeze_available", False):
+                # Use streak freeze power-up
+                streak["streak_freeze_available"] = False
+                streak["total_completions"] += 1
+                streak["last_completion_date"] = completion_dt.isoformat()
+                logger.info(f"User {user_id} used streak freeze to continue {streak['current_streak']} day streak")
+            else:
+                # Streak broken - reset to 1
+                streak["current_streak"] = 1
+                streak["total_completions"] += 1
+                streak["last_completion_date"] = completion_dt.isoformat()
+                streak_broken = True
+                logger.info(f"User {user_id} streak broken (missed {days_diff} days)")
+
+        else:
+            # Past date (shouldn't happen, but handle gracefully)
+            streak["total_completions"] += 1
+            streak["last_completion_date"] = completion_dt.isoformat()
+
+        # Update user document with new streak
+        await db.users.find_one_and_update(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "streak": streak
+                }
+            },
+            return_document=True
+        )
+
+        # Build response message
+        if streak_broken:
+            message = "Streak broken! Starting over at day 1"
+        elif milestone_achieved:
+            achievement_names = {
+                "3_day": "On Fire!",
+                "7_day": "Week Warrior!",
+                "30_day": "Legend!"
+            }
+            message = f"Streak updated to {streak['current_streak']} days! Achievement unlocked: {achievement_names[milestone_achieved]}!"
+        elif streak_increased:
+            message = f"Streak updated to {streak['current_streak']} days"
+        else:
+            message = f"Milestone completed (streak continued at {streak['current_streak']} days)"
+
+        if milestone_achieved:
+            logger.info(f"User {user_id} milestone achievement unlocked: {milestone_achieved}")
+        elif streak_increased:
+            logger.info(f"User {user_id} streak updated: {streak['current_streak']} days")
+
+        return {
+            "success": True,
+            "message": message,
+            "streak_data": streak,
+            "streak_increased": streak_increased,
+            "streak_broken": streak_broken,
+            "milestone_achieved": milestone_achieved
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating streak for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while updating streak"
         )
