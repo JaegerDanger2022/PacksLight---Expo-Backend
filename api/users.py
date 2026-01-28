@@ -576,3 +576,131 @@ async def update_streak(user_id: str, update_data: UpdateStreakRequest):
             status_code=500,
             detail="Internal server error while updating streak"
         )
+
+
+@router.get("/{user_id}/streak", status_code=200, tags=["users"])
+async def get_streak(user_id: str):
+    """
+    Fetch the current streak data for a user with automatic recalculation.
+
+    Checks if the user's streak needs to be recalculated (e.g., if a day has passed
+    since the last completion) and updates it in the database if necessary.
+
+    Args:
+        user_id: The user's unique identifier (Firebase UID)
+
+    Returns:
+        dict: Success status, streak data, and recalculation flags
+
+    Raises:
+        404: User not found
+        500: Database error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database not connected")
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        logger.info(f"[getStreak] Fetching streak for user {user_id}")
+
+        # Find user
+        user = await db.users.find_one({"user_id": user_id})
+        if user is None:
+            logger.warning(f"User not found: {user_id}")
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # Initialize streak if missing
+        streak = user.get("streak")
+        if not streak:
+            streak = {
+                "current_streak": 0,
+                "longest_streak": 0,
+                "last_completion_date": None,
+                "total_completions": 0,
+                "streak_freeze_available": False,
+                "milestone_achievements": {
+                    "three_day_count": 0,
+                    "seven_day_count": 0,
+                    "thirty_day_count": 0
+                }
+            }
+
+        # Track recalculation state
+        recalculated = False
+        streak_broken = False
+        current_streak_before = streak.get("current_streak", 0)
+
+        # Check if recalculation is needed
+        last_completion = streak.get("last_completion_date")
+
+        if last_completion is not None:
+            # Parse last_completion if it's a string
+            if isinstance(last_completion, str):
+                iso_string = last_completion.replace('Z', '+00:00')
+                last_completion_dt = datetime.fromisoformat(iso_string)
+            else:
+                last_completion_dt = last_completion
+
+            # Get current time in UTC
+            now_utc = datetime.now(timezone.utc)
+
+            # Calculate days difference
+            today = now_utc.date()
+            last_date = last_completion_dt.date()
+            days_diff = (today - last_date).days
+
+            logger.info(f"[getStreak] User {user_id}: days_diff={days_diff}, current_streak_before={current_streak_before}")
+
+            # Handle missed days (days_diff > 1)
+            if days_diff > 1:
+                logger.info(f"[getStreak] User {user_id} missed {days_diff} days")
+
+                if streak.get("streak_freeze_available", False):
+                    # Use streak freeze power-up
+                    streak["streak_freeze_available"] = False
+                    streak["last_completion_date"] = now_utc.isoformat()
+                    logger.info(f"[getStreak] User {user_id} used streak freeze to prevent reset")
+                    recalculated = True
+                else:
+                    # Streak broken - reset to 0
+                    streak["current_streak"] = 0
+                    streak["last_completion_date"] = None
+                    streak_broken = True
+                    recalculated = True
+                    logger.info(f"[getStreak] User {user_id} streak broken - reset to 0")
+
+        # Save updated streak if recalculation happened
+        if recalculated:
+            await db.users.find_one_and_update(
+                {"user_id": user_id},
+                {
+                    "$set": {
+                        "streak": streak
+                    }
+                },
+                return_document=True
+            )
+
+        current_streak_after = streak.get("current_streak", 0)
+        logger.info(f"[getStreak] User {user_id}, Current streak after: {current_streak_after}, Recalculated: {recalculated}, Broken: {streak_broken}")
+
+        return {
+            "success": True,
+            "message": "Streak fetched successfully",
+            "streak_data": streak,
+            "streak_broken": streak_broken,
+            "recalculated": recalculated
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching streak for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while fetching streak"
+        )
