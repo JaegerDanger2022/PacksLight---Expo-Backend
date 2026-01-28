@@ -165,8 +165,8 @@ async def update_milestone_status(
             if is_complete:
                 update_dream_fields["dreams.$[d].isComplete"] = True
                 update_dream_fields["dreams.$[d].completed_at"] = datetime.now(timezone.utc).isoformat()
-                update_dream_fields["dreams.$[d].status"] = "inactive"
-                logger.info(f"Dream {thread_id} is now complete! Setting status to inactive.")
+                update_dream_fields["dreams.$[d].status"] = "completed"
+                logger.info(f"Dream {thread_id} is now complete! Setting status to completed.")
 
             await db.users.update_one(
                 {
