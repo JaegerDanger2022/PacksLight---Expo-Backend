@@ -149,16 +149,30 @@ async def update_milestone_status(
                 new_score = current_score + xp_points
                 logger.info(f"Incrementing dream metadata.score from {current_score} to {new_score}")
 
-            # Update the dream's metadata.score
+            # Calculate total XP from all milestones in the dream
+            total_xp = sum(
+                m.get("xp_points", 0) for m in updated_dream.get("roadmap", {}).get("milestones", [])
+            )
+
+            # Check if dream is complete (score equals total XP)
+            is_complete = new_score == total_xp
+            logger.info(f"Dream completion check: score={new_score}, total_xp={total_xp}, isComplete={is_complete}")
+
+            # Update the dream's metadata.score and isComplete flag
+            update_dream_fields = {
+                "dreams.$[d].metadata.score": new_score
+            }
+            if is_complete:
+                update_dream_fields["dreams.$[d].isComplete"] = True
+                logger.info(f"Dream {thread_id} is now complete!")
+
             await db.users.update_one(
                 {
                     "user_id": user_id,
                     "dreams.thread_id": thread_id
                 },
                 {
-                    "$set": {
-                        "dreams.$[d].metadata.score": new_score
-                    }
+                    "$set": update_dream_fields
                 },
                 array_filters=[
                     {"d.thread_id": thread_id}
