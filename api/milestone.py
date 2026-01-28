@@ -3,6 +3,7 @@ Milestone API endpoints - Update and manage milestones in roadmaps
 """
 
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from core.database import get_db
@@ -85,6 +86,15 @@ async def update_milestone_status(
 
         logger.info(f"Found user, dream, and milestone. Proceeding with update.")
 
+        # Prepare update data with completedDate timestamp
+        update_fields = {
+            "dreams.$[d].roadmap.milestones.$[m].status": update_data.status
+        }
+
+        # Add completedDate if status is being set to 'completed'
+        if update_data.status == "completed":
+            update_fields["dreams.$[d].roadmap.milestones.$[m].completedDate"] = datetime.now(timezone.utc).isoformat()
+
         # Update the milestone status using array filters
         # This uses $set to update ONLY the status field, preserving all other milestone data
         # Only query by user_id - the array filters will handle the nested matching
@@ -93,9 +103,7 @@ async def update_milestone_status(
                 "user_id": user_id
             },
             {
-                "$set": {
-                    "dreams.$[d].roadmap.milestones.$[m].status": update_data.status
-                }
+                "$set": update_fields
             },
             array_filters=[
                 {"d.thread_id": thread_id},
