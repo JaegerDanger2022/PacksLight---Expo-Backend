@@ -53,6 +53,7 @@ class VictoryCardResponse(BaseModel):
 
     courageBoosts: int
     permissionsCount: int = 0  # NEW: Count of permission slips received
+    meTooCount: int = 0  # NEW: Count of Me Too clicks
     isAnonymous: bool
 
 
@@ -135,6 +136,7 @@ class VictoryCardDB(BaseModel):
 
     courageBoosts: int = 0
     permissionsCount: int = 0  # NEW: Count of permission slips received
+    meTooCount: int = 0  # NEW: Count of Me Too clicks
     hasUserBoosted: Dict[str, bool] = Field(default_factory=dict)  # Map for quick lookup
 
     isAnonymous: bool
@@ -159,6 +161,7 @@ class VictoryCardDB(BaseModel):
             createdAt=self.createdAt,
             courageBoosts=self.courageBoosts,
             permissionsCount=self.permissionsCount,
+            meTooCount=self.meTooCount,
             isAnonymous=self.isAnonymous
         )
 
@@ -216,6 +219,42 @@ class VictoryPermissionsResponse(BaseModel):
 
 
 # ====================
+# ME TOO MODELS
+# ====================
+
+class MeTooD B(BaseModel):
+    """Me Too database document"""
+    id: str
+    victoryCardId: str
+    userId: str
+    createdAt: str  # ISO date
+
+
+class ToggleMeTooResponse(BaseModel):
+    """Response for toggling Me Too"""
+    success: bool
+    newMeTooCount: int
+    added: bool  # true if added, false if removed
+
+
+class InspirationItem(BaseModel):
+    """Single inspiration item in user's list"""
+    id: str  # Victory card ID
+    milestoneTitle: str
+    dreamTitle: str
+    dreamCategory: str
+    userDisplayName: str
+    createdAt: str  # Victory creation date
+    meTooDate: str  # When user clicked Me Too
+
+
+class InspirationsResponse(BaseModel):
+    """Response for user's inspirations list"""
+    inspirations: list[InspirationItem]
+    total: int
+
+
+# ====================
 # UTILITY FUNCTIONS
 # ====================
 
@@ -258,6 +297,12 @@ def generate_permission_id() -> str:
     """Generate a unique permission slip ID"""
     import uuid
     return f"perm_{uuid.uuid4().hex[:12]}"
+
+
+def generate_metoo_id() -> str:
+    """Generate a unique Me Too ID"""
+    import uuid
+    return f"metoo_{uuid.uuid4().hex[:12]}"
 
 
 def get_permission_text(permission_type: int, dream_category: str) -> str:

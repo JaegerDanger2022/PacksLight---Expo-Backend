@@ -3,13 +3,15 @@ Community API endpoints for user stats and profile
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from core.database import get_db
 from models.community import (
     CommunityStatsResponse,
     UpdateCommunityProfileRequest,
     UpdateCommunityProfileResponse,
-    CommunityProfile
+    CommunityProfile,
+    InspirationsResponse,
+    InspirationItem
 )
 
 logger = logging.getLogger(__name__)
@@ -150,4 +152,74 @@ async def update_community_profile(userId: str, profile_data: UpdateCommunityPro
         raise
     except Exception as e:
         logger.error(f"Error updating community profile for {userId}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ====================
+# INSPIRATIONS ENDPOINTS
+# ====================
+
+@router.get("/users/{userId}/inspirations", response_model=InspirationsResponse, tags=["community"])
+async def get_user_inspirations(
+    userId: str,
+    limit: int = Query(20, ge=1, le=100, description="Number of inspirations to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset")
+):
+    """
+    Get list of victories the user has clicked "Me Too" on
+
+    Business Logic:
+    1. Query me_toos collection for user's entries
+    2. Join with victory_cards to get full victory details
+    3. Sort by meTooDate descending (most recent first)
+    4. Apply pagination
+    5. Return list with total count
+    """
+    try:
+        db = get_db()
+
+        # Validate user exists
+        user = await db.users.find_one({"user_id": userId})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Get total count
+        total = await db.me_toos.count_documents({"userId": userId})
+
+        # Query Me Toos with pagination, sorted by newest first
+        metoos_cursor = db.me_toos.find(
+            {"userId": userId}
+        ).sort("createdAt", -1).skip(offset).limit(limit)
+
+        metoos_list = await metoos_cursor.to_list(length=limit)
+
+        # Fetch corresponding victory cards
+        inspirations = []
+
+        for metoo in metoos_list:
+            victory = await db.victory_cards.find_one({"id": metoo["victoryCardId"]})
+
+            if victory:
+                inspiration = InspirationItem(
+                    id=victory["id"],
+                    milestoneTitle=victory.get("milestoneTitle", "Untitled"),
+                    dreamTitle=victory.get("dreamTitle", "Untitled Dream"),
+                    dreamCategory=victory.get("dreamCategory", "achievement_goals"),
+                    userDisplayName=victory.get("userDisplayName", "Anonymous"),
+                    createdAt=victory.get("createdAt", ""),
+                    meTooDate=metoo.get("createdAt", "")
+                )
+                inspirations.append(inspiration)
+
+        logger.info(f"Retrieved {len(inspirations)} inspirations for user {userId}")
+
+        return InspirationsResponse(
+            inspirations=inspirations,
+            total=total
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching inspirations for user {userId}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -155,6 +155,23 @@ async def create_indexes():
         await db.permission_slips.create_index([("victoryCardId", 1), ("giverId", 1)], unique=True)
         logger.info("[DB] Index created: permission_slips (victoryCardId, giverId)")
 
+        # Me Toos collection (Community Features - Phase 2)
+        logger.info("[DB] Creating compound index: me_toos (victoryCardId, userId) unique")
+        await db.me_toos.create_index([("victoryCardId", 1), ("userId", 1)], unique=True)
+        logger.info("[DB] Index created: me_toos (victoryCardId, userId)")
+
+        logger.info("[DB] Creating compound index: me_toos (userId, createdAt)")
+        await db.me_toos.create_index([("userId", 1), ("createdAt", -1)])
+        logger.info("[DB] Index created: me_toos (userId, createdAt)")
+
+        logger.info("[DB] Creating index: me_toos.id (unique)")
+        await db.me_toos.create_index("id", unique=True)
+        logger.info("[DB] Index created: me_toos.id")
+
+        logger.info("[DB] Creating index: me_toos.victoryCardId")
+        await db.me_toos.create_index("victoryCardId")
+        logger.info("[DB] Index created: me_toos.victoryCardId")
+
         logger.info("[DB] All database indexes created successfully")
     except Exception as e:
         logger.error(f"[DB] Failed to create indexes: {e}", exc_info=True)

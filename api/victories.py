@@ -21,9 +21,12 @@ from models.community import (
     GivePermissionResponse,
     PermissionSlipResponse,
     VictoryPermissionsResponse,
+    MeTooDB,
+    ToggleMeTooResponse,
     generate_victory_id,
     generate_boost_id,
     generate_permission_id,
+    generate_metoo_id,
     get_current_iso_timestamp,
     get_permission_text,
     DREAM_CATEGORIES,
@@ -577,4 +580,108 @@ async def get_victory_permissions(
         raise
     except Exception as e:
         logger.error(f"Error fetching permissions for victory {victoryId}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ====================
+# ME TOO ENDPOINTS
+# ====================
+
+@router.post("/{victoryId}/metoo", response_model=ToggleMeTooResponse, tags=["victories"])
+async def toggle_metoo(
+    victoryId: str,
+    user_id: str = Query(..., description="User ID clicking Me Too")
+):
+    """
+    Toggle Me Too for a victory card (add if not exists, remove if exists)
+
+    Note: In production, user_id should be derived from authentication context (Bearer token)
+    For now, it's passed as a query parameter for testing purposes
+
+    Business Logic:
+    1. Validate victory card exists
+    2. Check if user already has Me Too for this victory
+       - If exists: Remove Me Too document & decrement count
+       - If not exists: Create Me Too document & increment count
+    3. Return updated count and whether it was added or removed
+    4. NO notification sent (intentional - low-pressure feature)
+
+    Important Notes:
+    - This is a toggle endpoint - calling it twice removes the Me Too
+    - Users CAN give Me Too to their own victories (unlike permissions)
+    - No courage points awarded (unlike boosts/permissions)
+    """
+    try:
+        db = get_db()
+
+        # 1. Validate victory card exists
+        victory = await db.victory_cards.find_one({"id": victoryId})
+
+        if not victory:
+            raise HTTPException(status_code=404, detail="Victory card not found")
+
+        # 2. Check if user already has Me Too for this victory
+        existing_metoo = await db.me_toos.find_one({
+            "victoryCardId": victoryId,
+            "userId": user_id
+        })
+
+        if existing_metoo:
+            # Remove Me Too (toggle off)
+            await db.me_toos.delete_one({
+                "victoryCardId": victoryId,
+                "userId": user_id
+            })
+
+            # Decrement victory card's Me Too count
+            result = await db.victory_cards.find_one_and_update(
+                {"id": victoryId},
+                {"$inc": {"meTooCount": -1}},
+                return_document=True
+            )
+
+            new_metoo_count = max(0, result.get("meTooCount", 0))  # Ensure non-negative
+
+            logger.info(f"Me Too removed: user {user_id} from victory {victoryId}")
+
+            return ToggleMeTooResponse(
+                success=True,
+                newMeTooCount=new_metoo_count,
+                added=False
+            )
+
+        else:
+            # Add Me Too (toggle on)
+            metoo_id = generate_metoo_id()
+            metoo = MeTooDB(
+                id=metoo_id,
+                victoryCardId=victoryId,
+                userId=user_id,
+                createdAt=get_current_iso_timestamp()
+            )
+
+            # Insert Me Too into database
+            await db.me_toos.insert_one(metoo.model_dump())
+
+            # Increment victory card's Me Too count
+            result = await db.victory_cards.find_one_and_update(
+                {"id": victoryId},
+                {"$inc": {"meTooCount": 1}},
+                return_document=True
+            )
+
+            new_metoo_count = result.get("meTooCount", 1)
+
+            logger.info(f"Me Too added: user {user_id} to victory {victoryId}")
+
+            return ToggleMeTooResponse(
+                success=True,
+                newMeTooCount=new_metoo_count,
+                added=True
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling Me Too for victory {victoryId}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
