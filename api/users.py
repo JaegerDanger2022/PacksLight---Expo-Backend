@@ -149,7 +149,13 @@ async def register_user(user_data: CreateUserRequest):
             "email": user_data.email,
             "firstname": user_data.firstname,
             "lastname": user_data.lastname,
-            "created_at": datetime.now(timezone.utc)
+            "created_at": datetime.now(timezone.utc),
+            "couragePoints": 0,
+            "communityProfile": {
+                "location": None,
+                "age": None,
+                "shareAnonymousByDefault": False
+            }
         }
 
         # Insert into database

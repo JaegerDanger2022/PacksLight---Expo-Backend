@@ -88,6 +88,52 @@ async def create_indexes():
         await db.streaks.create_index("user_id", unique=True)
         logger.info("[DB] Index created: streaks.user_id")
 
+        # Victory Cards collection (Community Features)
+        logger.info("[DB] Creating index: victory_cards.dreamCategory")
+        await db.victory_cards.create_index("dreamCategory")
+        logger.info("[DB] Index created: victory_cards.dreamCategory")
+
+        logger.info("[DB] Creating index: victory_cards.completedDate")
+        await db.victory_cards.create_index("completedDate")
+        logger.info("[DB] Index created: victory_cards.completedDate")
+
+        logger.info("[DB] Creating index: victory_cards.createdAt")
+        await db.victory_cards.create_index("createdAt")
+        logger.info("[DB] Index created: victory_cards.createdAt")
+
+        logger.info("[DB] Creating index: victory_cards.userId")
+        await db.victory_cards.create_index("userId")
+        logger.info("[DB] Index created: victory_cards.userId")
+
+        logger.info("[DB] Creating index: victory_cards.id (unique)")
+        await db.victory_cards.create_index("id", unique=True)
+        logger.info("[DB] Index created: victory_cards.id")
+
+        logger.info("[DB] Creating index: victory_cards.milestoneId (unique)")
+        await db.victory_cards.create_index("milestoneId", unique=True)
+        logger.info("[DB] Index created: victory_cards.milestoneId")
+
+        # Courage Boosts collection (Community Features)
+        logger.info("[DB] Creating index: courage_boosts.victoryCardId")
+        await db.courage_boosts.create_index("victoryCardId")
+        logger.info("[DB] Index created: courage_boosts.victoryCardId")
+
+        logger.info("[DB] Creating index: courage_boosts.giverId")
+        await db.courage_boosts.create_index("giverId")
+        logger.info("[DB] Index created: courage_boosts.giverId")
+
+        logger.info("[DB] Creating index: courage_boosts.receiverId")
+        await db.courage_boosts.create_index("receiverId")
+        logger.info("[DB] Index created: courage_boosts.receiverId")
+
+        logger.info("[DB] Creating index: courage_boosts.id (unique)")
+        await db.courage_boosts.create_index("id", unique=True)
+        logger.info("[DB] Index created: courage_boosts.id")
+
+        logger.info("[DB] Creating compound index: courage_boosts (victoryCardId, giverId) unique")
+        await db.courage_boosts.create_index([("victoryCardId", 1), ("giverId", 1)], unique=True)
+        logger.info("[DB] Index created: courage_boosts (victoryCardId, giverId)")
+
         logger.info("[DB] All database indexes created successfully")
     except Exception as e:
         logger.error(f"[DB] Failed to create indexes: {e}", exc_info=True)

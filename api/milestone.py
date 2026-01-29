@@ -16,6 +16,8 @@ router = APIRouter()
 class UpdateMilestoneRequest(BaseModel):
     """Request schema for updating a milestone"""
     status: str = Field(..., description="New status for the milestone (e.g., 'completed', 'pending', 'in_progress')")
+    evidence: str | None = Field(None, max_length=200, description="Evidence/proof text, max 200 characters")
+    impact: str | None = Field(None, description="Impact level - 'critical', 'high', 'medium', or 'low'")
 
 
 @router.put("/update-status/{user_id}/{thread_id}/{milestone_id}", status_code=200, tags=["milestone"])
@@ -94,6 +96,18 @@ async def update_milestone_status(
         # Add completedDate if status is being set to 'completed'
         if update_data.status == "completed":
             update_fields["dreams.$[d].roadmap.milestones.$[m].completedDate"] = datetime.now(timezone.utc).isoformat()
+
+        # Add evidence if provided (for community features)
+        if update_data.evidence is not None:
+            update_fields["dreams.$[d].roadmap.milestones.$[m].evidence"] = update_data.evidence
+
+        # Add impact if provided and valid (for community features)
+        if update_data.impact is not None:
+            valid_impacts = ["critical", "high", "medium", "low"]
+            if update_data.impact in valid_impacts:
+                update_fields["dreams.$[d].roadmap.milestones.$[m].impact"] = update_data.impact
+            else:
+                logger.warning(f"Invalid impact level: {update_data.impact}. Using default.")
 
         # Update the milestone status using array filters
         # This uses $set to update ONLY the status field, preserving all other milestone data
@@ -183,9 +197,25 @@ async def update_milestone_status(
 
         logger.info(f"Successfully updated milestone {milestone_id} to status: {update_data.status}")
 
+        # Build milestone response data
+        milestone_response = None
+        if updated_milestone:
+            milestone_response = {
+                "id": updated_milestone.get("id"),
+                "title": updated_milestone.get("title"),
+                "status": updated_milestone.get("status"),
+                "evidence": updated_milestone.get("evidence"),
+                "impact": updated_milestone.get("impact"),
+                "completedDate": updated_milestone.get("completedDate"),
+                "xp_points": updated_milestone.get("xp_points"),
+                "challenge_type": updated_milestone.get("challenge_type"),
+                "streak_eligible": updated_milestone.get("streak_eligible")
+            }
+
         response = {
             "success": True,
-            "message": f"Milestone {milestone_id} status updated to {update_data.status}",
+            "message": f"Milestone updated",
+            "milestone": milestone_response
         }
 
         # Add isComplete to response if dream is complete
