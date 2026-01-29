@@ -11,7 +11,10 @@ from models.community import (
     UpdateCommunityProfileResponse,
     CommunityProfile,
     InspirationsResponse,
-    InspirationItem
+    InspirationItem,
+    VictoriesListResponse,
+    VictoryCardResponse,
+    PaginationInfo
 )
 
 logger = logging.getLogger(__name__)
@@ -222,4 +225,114 @@ async def get_user_inspirations(
         raise
     except Exception as e:
         logger.error(f"Error fetching inspirations for user {userId}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/users/{user_id}/inspiration", response_model=VictoriesListResponse, tags=["community"])
+async def get_user_inspiration(
+    user_id: str,
+    page: int = Query(1, ge=1, description="Page number for pagination"),
+    limit: int = Query(10, ge=1, le=50, description="Number of items per page")
+):
+    """
+    Retrieves all victory cards that the user has saved by clicking "Me Too"
+
+    This endpoint returns full victory card objects with hasUserBoosted and
+    hasUserMeTooed fields calculated for the requesting user.
+
+    Business Logic:
+    1. Query me_toos collection for user's entries
+    2. Join with victory_cards to get full victory details
+    3. Calculate hasUserBoosted by checking courage_boosts collection
+    4. Set hasUserMeTooed to true for all results
+    5. Sort by me_too.createdAt DESC (most recently saved first)
+    6. Apply pagination
+    """
+    try:
+        db = get_db()
+
+        # Validate user exists
+        user = await db.users.find_one({"user_id": user_id})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Calculate pagination
+        skip = (page - 1) * limit
+
+        # Get total count
+        total_count = await db.me_toos.count_documents({"userId": user_id})
+        total_pages = (total_count + limit - 1) // limit  # Ceiling division
+
+        # Query Me Toos with pagination, sorted by newest first
+        metoos_cursor = db.me_toos.find(
+            {"userId": user_id}
+        ).sort("createdAt", -1).skip(skip).limit(limit)
+
+        metoos_list = await metoos_cursor.to_list(length=limit)
+
+        # Fetch corresponding victory cards with all details
+        victories = []
+
+        for metoo in metoos_list:
+            victory_doc = await db.victory_cards.find_one({"id": metoo["victoryCardId"]})
+
+            if not victory_doc:
+                continue
+
+            # Check if user has boosted this victory
+            boost_exists = await db.courage_boosts.find_one({
+                "victoryCardId": victory_doc["id"],
+                "giverId": user_id
+            })
+            has_user_boosted = boost_exists is not None
+
+            # hasUserMeTooed is always true for this endpoint
+            has_user_metooed = True
+
+            # Build VictoryCardResponse
+            victory_response = VictoryCardResponse(
+                id=victory_doc["id"],
+                userId=victory_doc["userId"],
+                userDisplayName=victory_doc.get("userDisplayName", "Anonymous"),
+                userLocation=victory_doc.get("userLocation"),
+                userAge=victory_doc.get("userAge"),
+                milestoneId=victory_doc["milestoneId"],
+                milestoneTitle=victory_doc.get("milestoneTitle", "Untitled"),
+                dreamId=victory_doc["dreamId"],
+                dreamTitle=victory_doc.get("dreamTitle", "Untitled Dream"),
+                dreamCategory=victory_doc.get("dreamCategory", "achievement_goals"),
+                evidenceSnippet=victory_doc.get("evidenceSnippet", ""),
+                confidenceBoost=victory_doc.get("confidenceBoost", 0),
+                impactLevel=victory_doc.get("impactLevel", "medium"),
+                completedDate=victory_doc.get("completedDate", ""),
+                createdAt=victory_doc.get("createdAt", ""),
+                courageBoosts=victory_doc.get("courageBoosts", 0),
+                hasUserBoosted=has_user_boosted,
+                permissionsCount=victory_doc.get("permissionsCount", 0),
+                meTooCount=victory_doc.get("meTooCount", 0),
+                hasUserMeTooed=has_user_metooed,
+                isAnonymous=victory_doc.get("isAnonymous", False)
+            )
+
+            victories.append(victory_response)
+
+        logger.info(f"Retrieved {len(victories)} inspiration victories for user {user_id} (page {page})")
+
+        # Build pagination info
+        pagination = PaginationInfo(
+            page=page,
+            limit=limit,
+            totalPages=total_pages,
+            totalCount=total_count
+        )
+
+        return VictoriesListResponse(
+            victories=victories,
+            pagination=pagination
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching inspiration for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

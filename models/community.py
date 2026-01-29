@@ -52,8 +52,10 @@ class VictoryCardResponse(BaseModel):
     createdAt: str  # ISO date
 
     courageBoosts: int
-    permissionsCount: int = 0  # NEW: Count of permission slips received
-    meTooCount: int = 0  # NEW: Count of Me Too clicks
+    hasUserBoosted: Optional[bool] = None  # Whether requesting user has boosted this victory
+    permissionsCount: int = 0  # Count of permission slips received
+    meTooCount: int = 0  # Count of Me Too clicks
+    hasUserMeTooed: Optional[bool] = None  # Whether requesting user has Me Too'd this victory
     isAnonymous: bool
 
 
