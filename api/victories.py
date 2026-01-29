@@ -122,9 +122,32 @@ async def get_victories(
         victories_list = await victories_cursor.to_list(length=limit)
 
         # Convert to response models
-        victories = [
-            VictoryCardResponse(**victory) for victory in victories_list
-        ]
+        victories = []
+        for victory_doc in victories_list:
+            victory_response = VictoryCardResponse(
+                id=victory_doc["id"],
+                userId=victory_doc["userId"],
+                userDisplayName=victory_doc.get("userDisplayName", "Anonymous"),
+                userLocation=victory_doc.get("userLocation"),
+                userAge=victory_doc.get("userAge"),
+                milestoneId=victory_doc["milestoneId"],
+                milestoneTitle=victory_doc.get("milestoneTitle", "Untitled"),
+                dreamId=victory_doc["dreamId"],
+                dreamTitle=victory_doc.get("dreamTitle", "Untitled Dream"),
+                dreamCategory=victory_doc.get("dreamCategory", "achievement_goals"),
+                evidenceSnippet=victory_doc.get("evidenceSnippet", ""),
+                confidenceBoost=victory_doc.get("confidenceBoost", 0),
+                impactLevel=victory_doc.get("impactLevel", "medium"),
+                completedDate=victory_doc.get("completedDate", ""),
+                createdAt=victory_doc.get("createdAt", ""),
+                courageBoosts=victory_doc.get("courageBoosts", 0),
+                hasUserBoosted=None,  # Not calculated for list view (no user context)
+                permissionsCount=victory_doc.get("permissionsCount", 0),
+                meTooCount=victory_doc.get("meTooCount", 0),
+                hasUserMeTooed=None,  # Not calculated for list view (no user context)
+                isAnonymous=victory_doc.get("isAnonymous", False)
+            )
+            victories.append(victory_response)
 
         pagination = PaginationInfo(
             page=page,
@@ -277,12 +300,34 @@ async def get_victory(victoryId: str):
     try:
         db = get_db()
 
-        victory = await db.victory_cards.find_one({"id": victoryId})
+        victory_doc = await db.victory_cards.find_one({"id": victoryId})
 
-        if not victory:
+        if not victory_doc:
             raise HTTPException(status_code=404, detail="Victory card not found")
 
-        return VictoryCardResponse(**victory)
+        return VictoryCardResponse(
+            id=victory_doc["id"],
+            userId=victory_doc["userId"],
+            userDisplayName=victory_doc.get("userDisplayName", "Anonymous"),
+            userLocation=victory_doc.get("userLocation"),
+            userAge=victory_doc.get("userAge"),
+            milestoneId=victory_doc["milestoneId"],
+            milestoneTitle=victory_doc.get("milestoneTitle", "Untitled"),
+            dreamId=victory_doc["dreamId"],
+            dreamTitle=victory_doc.get("dreamTitle", "Untitled Dream"),
+            dreamCategory=victory_doc.get("dreamCategory", "achievement_goals"),
+            evidenceSnippet=victory_doc.get("evidenceSnippet", ""),
+            confidenceBoost=victory_doc.get("confidenceBoost", 0),
+            impactLevel=victory_doc.get("impactLevel", "medium"),
+            completedDate=victory_doc.get("completedDate", ""),
+            createdAt=victory_doc.get("createdAt", ""),
+            courageBoosts=victory_doc.get("courageBoosts", 0),
+            hasUserBoosted=None,  # Not calculated for single view (no user context)
+            permissionsCount=victory_doc.get("permissionsCount", 0),
+            meTooCount=victory_doc.get("meTooCount", 0),
+            hasUserMeTooed=None,  # Not calculated for single view (no user context)
+            isAnonymous=victory_doc.get("isAnonymous", False)
+        )
 
     except HTTPException:
         raise
