@@ -134,6 +134,27 @@ async def create_indexes():
         await db.courage_boosts.create_index([("victoryCardId", 1), ("giverId", 1)], unique=True)
         logger.info("[DB] Index created: courage_boosts (victoryCardId, giverId)")
 
+        # Permission Slips collection (Community Features - Phase 2)
+        logger.info("[DB] Creating compound index: permission_slips (victoryCardId, createdAt)")
+        await db.permission_slips.create_index([("victoryCardId", 1), ("createdAt", -1)])
+        logger.info("[DB] Index created: permission_slips (victoryCardId, createdAt)")
+
+        logger.info("[DB] Creating compound index: permission_slips (receiverId, createdAt)")
+        await db.permission_slips.create_index([("receiverId", 1), ("createdAt", -1)])
+        logger.info("[DB] Index created: permission_slips (receiverId, createdAt)")
+
+        logger.info("[DB] Creating index: permission_slips.giverId")
+        await db.permission_slips.create_index("giverId")
+        logger.info("[DB] Index created: permission_slips.giverId")
+
+        logger.info("[DB] Creating index: permission_slips.id (unique)")
+        await db.permission_slips.create_index("id", unique=True)
+        logger.info("[DB] Index created: permission_slips.id")
+
+        logger.info("[DB] Creating compound index: permission_slips (victoryCardId, giverId) unique")
+        await db.permission_slips.create_index([("victoryCardId", 1), ("giverId", 1)], unique=True)
+        logger.info("[DB] Index created: permission_slips (victoryCardId, giverId)")
+
         logger.info("[DB] All database indexes created successfully")
     except Exception as e:
         logger.error(f"[DB] Failed to create indexes: {e}", exc_info=True)

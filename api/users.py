@@ -155,6 +155,10 @@ async def register_user(user_data: CreateUserRequest):
                 "location": None,
                 "age": None,
                 "shareAnonymousByDefault": False
+            },
+            "communityStats": {
+                "permissionsGiven": 0,
+                "permissionsReceived": 0
             }
         }
 

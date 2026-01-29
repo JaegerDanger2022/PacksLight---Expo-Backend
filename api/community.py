@@ -49,6 +49,12 @@ async def get_community_stats(userId: str):
         # Count boosts given
         boosts_given = await db.courage_boosts.count_documents({"giverId": userId})
 
+        # Count permissions received
+        permissions_received = await db.permission_slips.count_documents({"receiverId": userId})
+
+        # Count permissions given
+        permissions_given = await db.permission_slips.count_documents({"giverId": userId})
+
         # Get courage points from user document
         courage_points = user.get("couragePoints", 0)
 
@@ -58,6 +64,8 @@ async def get_community_stats(userId: str):
             victoriesShared=victories_shared,
             boostsReceived=boosts_received,
             boostsGiven=boosts_given,
+            permissionsReceived=permissions_received,
+            permissionsGiven=permissions_given,
             couragePoints=courage_points
         )
 

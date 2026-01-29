@@ -16,9 +16,16 @@ from models.community import (
     CourageBoostDB,
     BoostVictoryResponse,
     PaginationInfo,
+    PermissionSlipDB,
+    GivePermissionRequest,
+    GivePermissionResponse,
+    PermissionSlipResponse,
+    VictoryPermissionsResponse,
     generate_victory_id,
     generate_boost_id,
+    generate_permission_id,
     get_current_iso_timestamp,
+    get_permission_text,
     DREAM_CATEGORIES,
     IMPACT_LEVELS
 )
@@ -378,4 +385,196 @@ async def boost_victory(victoryId: str, giver_user_id: str = Query(..., descript
         raise
     except Exception as e:
         logger.error(f"Error boosting victory {victoryId}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ====================
+# PERMISSION SLIP ENDPOINTS
+# ====================
+
+@router.post("/{victoryId}/permission", response_model=GivePermissionResponse, tags=["victories"])
+async def give_permission(
+    victoryId: str,
+    permission_data: GivePermissionRequest,
+    giver_user_id: str = Query(..., description="User ID of the person giving the permission")
+):
+    """
+    Give a permission slip to a victory card
+
+    Note: In production, giver_user_id should be derived from authentication context (Bearer token)
+    For now, it's passed as a query parameter for testing purposes
+
+    Business Logic:
+    1. Validate permissionType is 1, 2, 3, or 4
+    2. Validate victory card exists
+    3. Check user hasn't already given a permission to this victory
+    4. Get victory card's dream category
+    5. Generate permissionText based on type and category
+    6. Create permission slip document
+    7. Increment permissionsCount on victory card (+1)
+    8. Award +5 courage points to receiver
+    9. Increment permissionsGiven stat for giver
+    10. Increment permissionsReceived stat for receiver
+    """
+    try:
+        db = get_db()
+
+        # 1. Validate victory card exists
+        victory = await db.victory_cards.find_one({"id": victoryId})
+
+        if not victory:
+            raise HTTPException(status_code=404, detail="Victory card not found")
+
+        # 2. Prevent users from giving permissions to their own victories
+        if victory["userId"] == giver_user_id:
+            raise HTTPException(status_code=400, detail="Cannot give permission to your own victory")
+
+        # 3. Check if user has already given a permission to this victory
+        existing_permission = await db.permission_slips.find_one({
+            "victoryCardId": victoryId,
+            "giverId": giver_user_id
+        })
+
+        if existing_permission:
+            raise HTTPException(status_code=409, detail="User has already given a permission to this victory")
+
+        # 4. Get giver's display name
+        giver = await db.users.find_one({"user_id": giver_user_id})
+        giver_display_name = "Anonymous"
+
+        if giver:
+            community_profile = giver.get("communityProfile", {})
+            share_anonymous = community_profile.get("shareAnonymousByDefault", False)
+
+            if not share_anonymous:
+                giver_display_name = giver.get("firstname", "Anonymous")
+
+        # 5. Generate permission text based on type and category
+        dream_category = victory.get("dreamCategory", "achievement_goals")
+        permission_text = get_permission_text(permission_data.permissionType, dream_category)
+
+        # 6. Create permission slip document
+        permission_id = generate_permission_id()
+        permission_slip = PermissionSlipDB(
+            id=permission_id,
+            victoryCardId=victoryId,
+            giverId=giver_user_id,
+            giverDisplayName=giver_display_name,
+            receiverId=victory["userId"],
+            permissionType=permission_data.permissionType,
+            permissionText=permission_text,
+            createdAt=get_current_iso_timestamp()
+        )
+
+        # 7. Insert permission into database
+        await db.permission_slips.insert_one(permission_slip.model_dump())
+
+        # 8. Increment victory card's permission count
+        await db.victory_cards.update_one(
+            {"id": victoryId},
+            {"$inc": {"permissionsCount": 1}}
+        )
+
+        # 9. Award +5 courage points to receiver
+        courage_points_awarded = 5
+
+        # Initialize couragePoints if it doesn't exist
+        receiver = await db.users.find_one({"user_id": victory["userId"]})
+        if receiver and "couragePoints" not in receiver:
+            await db.users.update_one(
+                {"user_id": victory["userId"]},
+                {"$set": {"couragePoints": 0}}
+            )
+
+        # Update receiver's courage points
+        await db.users.update_one(
+            {"user_id": victory["userId"]},
+            {"$inc": {"couragePoints": courage_points_awarded}}
+        )
+
+        # 10. Update giver's permissionsGiven stat
+        await db.users.update_one(
+            {"user_id": giver_user_id},
+            {"$inc": {"communityStats.permissionsGiven": 1}}
+        )
+
+        # 11. Update receiver's permissionsReceived stat
+        await db.users.update_one(
+            {"user_id": victory["userId"]},
+            {"$inc": {"communityStats.permissionsReceived": 1}}
+        )
+
+        logger.info(f"Permission slip given: {permission_id} from {giver_user_id} to victory {victoryId}")
+
+        return GivePermissionResponse(
+            success=True,
+            permissionText=permission_text,
+            couragePointsAwarded=courage_points_awarded
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error giving permission to victory {victoryId}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{victoryId}/permissions", response_model=VictoryPermissionsResponse, tags=["victories"])
+async def get_victory_permissions(
+    victoryId: str,
+    limit: int = Query(50, ge=1, le=100, description="Number of permissions to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset")
+):
+    """
+    Retrieve all permission slips for a victory card
+
+    Business Logic:
+    1. Validate victory card exists
+    2. Query permission slips by victoryCardId
+    3. Sort by createdAt descending (newest first)
+    4. Apply pagination (limit & offset)
+    5. Return list with total count
+    """
+    try:
+        db = get_db()
+
+        # 1. Validate victory card exists
+        victory = await db.victory_cards.find_one({"id": victoryId})
+
+        if not victory:
+            raise HTTPException(status_code=404, detail="Victory card not found")
+
+        # 2. Get total count
+        total = await db.permission_slips.count_documents({"victoryCardId": victoryId})
+
+        # 3. Query permissions with pagination, sorted by newest first
+        permissions_cursor = db.permission_slips.find(
+            {"victoryCardId": victoryId}
+        ).sort("createdAt", -1).skip(offset).limit(limit)
+
+        permissions_list = await permissions_cursor.to_list(length=limit)
+
+        # 4. Convert to response models
+        permissions = [
+            PermissionSlipResponse(
+                id=perm["id"],
+                giverDisplayName=perm["giverDisplayName"],
+                permissionText=perm["permissionText"],
+                createdAt=perm["createdAt"]
+            )
+            for perm in permissions_list
+        ]
+
+        logger.info(f"Retrieved {len(permissions)} permissions for victory {victoryId}")
+
+        return VictoryPermissionsResponse(
+            permissions=permissions,
+            count=len(permissions),
+            total=total
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching permissions for victory {victoryId}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
