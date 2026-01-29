@@ -222,7 +222,7 @@ class VictoryPermissionsResponse(BaseModel):
 # ME TOO MODELS
 # ====================
 
-class MeTooD B(BaseModel):
+class MeTooDB(BaseModel):
     """Me Too database document"""
     id: str
     victoryCardId: str
