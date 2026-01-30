@@ -172,6 +172,23 @@ async def create_indexes():
         await db.me_toos.create_index("victoryCardId")
         logger.info("[DB] Index created: me_toos.victoryCardId")
 
+        # Journey Recaps collection (Community Features - Phase 2)
+        logger.info("[DB] Creating compound index: journey_recaps (dreamCategory, createdAt)")
+        await db.journey_recaps.create_index([("dreamCategory", 1), ("createdAt", -1)])
+        logger.info("[DB] Index created: journey_recaps (dreamCategory, createdAt)")
+
+        logger.info("[DB] Creating compound index: journey_recaps (userId, createdAt)")
+        await db.journey_recaps.create_index([("userId", 1), ("createdAt", -1)])
+        logger.info("[DB] Index created: journey_recaps (userId, createdAt)")
+
+        logger.info("[DB] Creating index: journey_recaps.createdAt")
+        await db.journey_recaps.create_index("createdAt")
+        logger.info("[DB] Index created: journey_recaps.createdAt")
+
+        logger.info("[DB] Creating compound index: journey_recaps (userId, dreamId) unique")
+        await db.journey_recaps.create_index([("userId", 1), ("dreamId", 1)], unique=True)
+        logger.info("[DB] Index created: journey_recaps (userId, dreamId) - ensures one recap per dream")
+
         logger.info("[DB] All database indexes created successfully")
     except Exception as e:
         logger.error(f"[DB] Failed to create indexes: {e}", exc_info=True)

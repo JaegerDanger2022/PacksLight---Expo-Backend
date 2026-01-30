@@ -229,6 +229,52 @@ async def update_milestone_status(
             new_score = current_score + xp_points
             is_complete_response = new_score == total_xp
             response["isComplete"] = is_complete_response
+            response["dreamCompleted"] = is_complete_response  # NEW: explicit flag for journey recap
+
+            # Add dream stats for Journey Recap if dream is complete
+            if is_complete_response:
+                all_milestones = updated_dream.get("roadmap", {}).get("milestones", [])
+                total_milestone_count = len(all_milestones)
+
+                # Count completed milestones
+                completed_milestones = [
+                    m for m in all_milestones
+                    if m.get("status") == "completed"
+                ]
+                completed_milestone_count = len(completed_milestones)
+
+                # Find earliest completedDate (dream start date)
+                completed_dates = [
+                    m.get("completedDate")
+                    for m in all_milestones
+                    if m.get("completedDate") is not None
+                ]
+                dream_start_date = min(completed_dates) if completed_dates else None
+
+                # Get dream completion date
+                dream_completed_date = updated_dream.get("completed_at")
+
+                # Calculate duration in days
+                duration_days = 0
+                if dream_start_date and dream_completed_date:
+                    try:
+                        start = datetime.fromisoformat(dream_start_date.replace('Z', '+00:00'))
+                        end = datetime.fromisoformat(dream_completed_date.replace('Z', '+00:00'))
+                        duration_days = max(0, (end - start).days)
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate duration: {e}")
+                        duration_days = 0
+
+                response["dreamStats"] = {
+                    "totalMilestones": total_milestone_count,
+                    "completedMilestones": completed_milestone_count,
+                    "completionPercentage": 100,
+                    "dreamStartDate": dream_start_date,
+                    "dreamCompletedDate": dream_completed_date,
+                    "durationDays": duration_days
+                }
+
+                logger.info(f"Dream complete! Stats: {response['dreamStats']}")
 
         return response
 
