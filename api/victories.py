@@ -78,21 +78,23 @@ def parse_categories_filter(categories: Optional[str]) -> dict:
 # VICTORY CARD ENDPOINTS
 # ====================
 
-@router.get("", response_model=VictoriesListResponse, tags=["victories"])
+@router.get("", tags=["victories"])
 async def get_victories(
     page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(20, ge=1, le=100, description="Cards per page"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
     categories: Optional[str] = Query(None, description="Comma-separated list of dream categories"),
-    timeframe: Optional[str] = Query(None, description="Filter by time - 'week', 'month', or omit for 'all'")
+    timeframe: Optional[str] = Query(None, description="Filter by time - 'week', 'month', or omit for 'all'"),
+    user_id: Optional[str] = Query(None, description="User ID for personalized hasUserBoosted/hasUserMeTooed flags")
 ):
     """
-    Fetch victory cards with filtering and pagination
+    Fetch combined feed of victory cards and journey recaps with filtering and pagination
 
     Query Parameters:
     - page: Page number (default: 1)
-    - limit: Cards per page (default: 20, max: 100)
+    - limit: Items per page (default: 20, max: 100)
     - categories: Comma-separated dream categories
     - timeframe: 'week', 'month', or omit for 'all'
+    - user_id: Optional user ID for personalized flags
     """
     try:
         db = get_db()
@@ -110,56 +112,92 @@ async def get_victories(
         if timeframe_filter:
             query_filter.update(timeframe_filter)
 
-        # Calculate pagination
-        skip = (page - 1) * limit
+        # 1. Fetch victory cards
+        victories_cursor = db.victory_cards.find(query_filter)
+        victories_list = await victories_cursor.to_list(length=None)
 
-        # Get total count
-        total_count = await db.victory_cards.count_documents(query_filter)
-        total_pages = (total_count + limit - 1) // limit  # Ceiling division
+        # 2. Fetch journey recaps
+        journeys_cursor = db.journey_recaps.find(query_filter)
+        journeys_list = await journeys_cursor.to_list(length=None)
 
-        # Fetch victories, sorted by creation date (newest first)
-        victories_cursor = db.victory_cards.find(query_filter).sort("createdAt", -1).skip(skip).limit(limit)
-        victories_list = await victories_cursor.to_list(length=limit)
-
-        # Convert to response models
-        victories = []
+        # 3. Transform to unified format with type field
+        victory_items = []
         for victory_doc in victories_list:
-            victory_response = VictoryCardResponse(
-                id=victory_doc["id"],
-                userId=victory_doc["userId"],
-                userDisplayName=victory_doc.get("userDisplayName", "Anonymous"),
-                userLocation=victory_doc.get("userLocation"),
-                userAge=victory_doc.get("userAge"),
-                milestoneId=victory_doc["milestoneId"],
-                milestoneTitle=victory_doc.get("milestoneTitle", "Untitled"),
-                dreamId=victory_doc["dreamId"],
-                dreamTitle=victory_doc.get("dreamTitle", "Untitled Dream"),
-                dreamCategory=victory_doc.get("dreamCategory", "achievement_goals"),
-                evidenceSnippet=victory_doc.get("evidenceSnippet", ""),
-                confidenceBoost=victory_doc.get("confidenceBoost", 0),
-                impactLevel=victory_doc.get("impactLevel", "medium"),
-                completedDate=victory_doc.get("completedDate", ""),
-                createdAt=victory_doc.get("createdAt", ""),
-                courageBoosts=victory_doc.get("courageBoosts", 0),
-                hasUserBoosted=None,  # Not calculated for list view (no user context)
-                permissionsCount=victory_doc.get("permissionsCount", 0),
-                meTooCount=victory_doc.get("meTooCount", 0),
-                hasUserMeTooed=None,  # Not calculated for list view (no user context)
-                isAnonymous=victory_doc.get("isAnonymous", False)
-            )
-            victories.append(victory_response)
+            item = {
+                "type": "victory_card",
+                "id": victory_doc.get("id", str(victory_doc.get("_id"))),
+                "userId": victory_doc["userId"],
+                "userDisplayName": victory_doc.get("userDisplayName", "Anonymous"),
+                "userLocation": victory_doc.get("userLocation"),
+                "userAge": victory_doc.get("userAge"),
+                "milestoneId": victory_doc["milestoneId"],
+                "milestoneTitle": victory_doc.get("milestoneTitle", "Untitled"),
+                "dreamId": victory_doc["dreamId"],
+                "dreamTitle": victory_doc.get("dreamTitle", "Untitled Dream"),
+                "dreamCategory": victory_doc.get("dreamCategory", "achievement_goals"),
+                "evidenceSnippet": victory_doc.get("evidenceSnippet", ""),
+                "confidenceBoost": victory_doc.get("confidenceBoost", 0),
+                "impactLevel": victory_doc.get("impactLevel", "medium"),
+                "completedDate": victory_doc.get("completedDate", ""),
+                "createdAt": victory_doc.get("createdAt", ""),
+                "courageBoosts": victory_doc.get("courageBoosts", 0),
+                "hasUserBoosted": None,
+                "permissionsCount": victory_doc.get("permissionsCount", 0),
+                "meTooCount": victory_doc.get("meTooCount", 0),
+                "hasUserMeTooed": None,
+                "isAnonymous": victory_doc.get("isAnonymous", False)
+            }
+            victory_items.append(item)
 
-        pagination = PaginationInfo(
-            page=page,
-            limit=limit,
-            totalPages=total_pages,
-            totalCount=total_count
-        )
+        journey_items = []
+        for journey_doc in journeys_list:
+            item = {
+                "type": "journey_recap",
+                "id": str(journey_doc.get("_id")),
+                "userId": journey_doc["userId"],
+                "userDisplayName": journey_doc.get("userDisplayName", "Anonymous"),
+                "userLocation": journey_doc.get("userLocation"),
+                "userAge": journey_doc.get("userAge"),
+                "dreamId": journey_doc["dreamId"],
+                "dreamTitle": journey_doc.get("dreamTitle", "Untitled Dream"),
+                "dreamCategory": journey_doc.get("dreamCategory", "achievement_goals"),
+                "journeyStory": journey_doc.get("journeyStory", ""),
+                "totalMilestones": journey_doc.get("totalMilestones", 0),
+                "durationDays": journey_doc.get("durationDays", 0),
+                "keyMoment": journey_doc.get("keyMoment"),
+                "completedDate": journey_doc.get("completedDate", ""),
+                "createdAt": journey_doc.get("createdAt", ""),
+                "courageBoosts": journey_doc.get("courageBoosts", 0),
+                "hasUserBoosted": None,
+                "permissionsCount": journey_doc.get("permissionsCount", 0),
+                "meTooCount": journey_doc.get("meTooCount", 0),
+                "hasUserMeTooed": None,
+                "isAnonymous": journey_doc.get("isAnonymous", False)
+            }
+            journey_items.append(item)
 
-        return VictoriesListResponse(victories=victories, pagination=pagination)
+        # 4. Merge and sort by createdAt (newest first)
+        combined_feed = victory_items + journey_items
+        combined_feed.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+
+        # 5. Apply pagination
+        total_count = len(combined_feed)
+        total_pages = (total_count + limit - 1) // limit
+        start_index = (page - 1) * limit
+        end_index = start_index + limit
+        paginated_feed = combined_feed[start_index:end_index]
+
+        pagination = {
+            "page": page,
+            "limit": limit,
+            "totalPages": total_pages,
+            "totalCount": total_count
+        }
+
+        return {"feed": paginated_feed, "pagination": pagination}
 
     except Exception as e:
-        logger.error(f"Error fetching victories: {e}", exc_info=True)
+        logger.error(f"Error fetching victories feed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
