@@ -88,6 +88,29 @@ async def update_milestone_status(
 
         logger.info(f"Found user, dream, and milestone. Proceeding with update.")
 
+        # Check if roadmap status is "started", if not set it
+        for dream in verify_doc.get("dreams", []):
+            if dream.get("thread_id") == thread_id:
+                roadmap_status = dream.get("roadmap", {}).get("status")
+                if roadmap_status != "started":
+                    logger.info(f"Roadmap status is '{roadmap_status}', setting to 'started'")
+                    # Update roadmap status to "started"
+                    await db.users.update_one(
+                        {
+                            "user_id": user_id,
+                            "dreams.thread_id": thread_id
+                        },
+                        {
+                            "$set": {
+                                "dreams.$[d].roadmap.status": "started"
+                            }
+                        },
+                        array_filters=[
+                            {"d.thread_id": thread_id}
+                        ]
+                    )
+                break
+
         # Prepare update data with completedDate timestamp
         update_fields = {
             "dreams.$[d].roadmap.milestones.$[m].status": update_data.status
