@@ -12,6 +12,7 @@ from api.milestone import router as milestone_router
 from api.victories import router as victories_router
 from api.community import router as community_router
 from api.journey_recap import router as journey_recap_router
+from api.voice import router as voice_router
 from core.database import connect_db, close_db
 
 load_dotenv()
@@ -80,6 +81,7 @@ app.include_router(milestone_router, prefix="/api/milestone", tags=["milestone"]
 app.include_router(victories_router, prefix="/api/victories", tags=["victories"])
 app.include_router(community_router, prefix="/api", tags=["community"])
 app.include_router(journey_recap_router, prefix="/api/journey-recaps", tags=["journey-recap"])
+app.include_router(voice_router, prefix="/api/voice", tags=["voice-assistant"])
 
 
 @app.get("/health", tags=["health"])
