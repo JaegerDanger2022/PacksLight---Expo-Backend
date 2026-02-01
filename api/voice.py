@@ -213,7 +213,7 @@ class VoiceAssistantSession:
                     # User finished speaking - signal end of turn to Gemini
                     logger.info("End of user audio turn, signaling to Gemini")
                     await session.send(end_of_turn=True)
-                    break
+                    # Don't break - continue listening for next turn
 
         except WebSocketDisconnect:
             logger.info("Client disconnected during audio send")
@@ -239,12 +239,13 @@ class VoiceAssistantSession:
                                 # Call the function to get formatted context
                                 enriched_context = end_conversation(**args)
 
-                                # Notify client
+                                # Notify client that conversation is complete
                                 await websocket.send_json({
                                     "type": "conversation_complete",
                                     "enriched_context": enriched_context
                                 })
 
+                                # Return the context to end the conversation
                                 return enriched_context
 
                 # Handle audio/text responses
