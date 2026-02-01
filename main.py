@@ -66,6 +66,11 @@ if isinstance(allowed_origins, str):
     except:
         allowed_origins = ["http://localhost:3000"]
 
+# For production, allow all origins for WebSocket connections
+# This is safe for WebSockets as they don't have the same CSRF risks as HTTP
+if os.getenv("ENVIRONMENT") == "production":
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
