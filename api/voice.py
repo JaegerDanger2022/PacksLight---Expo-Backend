@@ -248,7 +248,7 @@ class VoiceAssistantSession:
                                 return enriched_context
 
                 # Handle audio/text responses
-                if response.server_content:
+                if response.server_content and response.server_content.model_turn:
                     for part in response.server_content.model_turn.parts:
                         # Audio response - send to client
                         if hasattr(part, 'inline_data') and part.inline_data is not None:
