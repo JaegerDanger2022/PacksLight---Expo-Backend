@@ -202,7 +202,9 @@ class VoiceAssistantSession:
                     await session.send(input=audio_data, end_of_turn=False)
 
                 elif message.get("type") == "end_audio":
-                    # User finished speaking for this turn
+                    # User finished speaking - signal end of turn to Gemini
+                    logger.info("End of user audio turn, signaling to Gemini")
+                    await session.send(end_of_turn=True)
                     break
 
         except WebSocketDisconnect:
