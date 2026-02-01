@@ -127,8 +127,9 @@ class VoiceAssistantSession:
             api_key=GEMINI_API_KEY,
             http_options={'api_version': 'v1alpha'}
         )
-        # Gemini 2.0 Flash model for Live API
-        self.model = "gemini-2.0-flash-exp"
+        # Use the correct model name for Live API (bidiGenerateContent)
+        # Reference: https://github.com/google/adk-python/issues/866
+        self.model = "gemini-2.0-flash-live-001"
         self.enriched_context = None
 
     async def run_conversation(self, websocket: WebSocket) -> Optional[dict]:
