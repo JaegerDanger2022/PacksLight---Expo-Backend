@@ -12,7 +12,7 @@ from api.milestone import router as milestone_router
 from api.victories import router as victories_router
 from api.community import router as community_router
 from api.journey_recap import router as journey_recap_router
-from api.voice import router as voice_router
+from api.voice_v2 import router as voice_router  # Updated to v2 (LangGraph + Eleven Labs)
 from core.database import connect_db, close_db
 
 load_dotenv()
