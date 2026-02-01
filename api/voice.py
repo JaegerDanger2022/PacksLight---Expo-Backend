@@ -42,6 +42,7 @@ CONVERSATION FLOW:
 
 1. INTRODUCTION (Your first message):
    "Hi! I'm here to help you build a roadmap for your dreams. What's a goal or dream you'd like to work on?"
+   IMPORTANT: DO NOT call end_conversation yet - wait for the user to respond!
 
 2. LISTEN TO THEIR DREAM:
    - Let them share in their own words
@@ -58,11 +59,13 @@ CONVERSATION FLOW:
    - Don't probe deeply - just note them naturally
    - Be encouraging if they express doubt
 
-5. WRAP UP (after 2-3 exchanges):
+5. WRAP UP (ONLY after 2-3 exchanges with the user):
    "Got it! I have what I need to create your personalized roadmap. Give me just a moment..."
    - Then call end_conversation function with all the details you gathered
 
-RULES:
+CRITICAL RULES:
+- DO NOT call end_conversation function until you've had at least 2 back-and-forth exchanges with the user
+- The user MUST share their dream and you MUST ask at least one clarifying question before ending
 - Keep it conversational and brief (2-3 min max total conversation)
 - Ask ONE question at a time
 - Don't sound like a form or survey
@@ -158,7 +161,7 @@ class VoiceAssistantSession:
                 # Send initial prompt to trigger AI greeting
                 # This makes the AI speak first instead of waiting for user input
                 await session.send(
-                    input="Start the conversation with your greeting.",
+                    input="Greet the user with your introduction. Wait for their response before proceeding.",
                     end_of_turn=True
                 )
                 logger.info("🎙️ Sent initial prompt to trigger AI greeting")
