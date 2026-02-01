@@ -122,8 +122,13 @@ class VoiceAssistantSession:
     """Manages a single Gemini 2.0 Live API session."""
 
     def __init__(self):
-        self.client = genai.Client(api_key=GEMINI_API_KEY)
-        self.model = "models/gemini-2.0-flash-exp"
+        # Use v1alpha API version for Gemini 2.0 Live API features
+        self.client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options={'api_version': 'v1alpha'}
+        )
+        # Gemini 2.0 Flash model for Live API
+        self.model = "gemini-2.0-flash-exp"
         self.enriched_context = None
 
     async def run_conversation(self, websocket: WebSocket) -> Optional[dict]:
