@@ -42,6 +42,7 @@ class CreateDreamRequest(BaseModel):
     roadmap: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Dream roadmap/plan")
     tracks: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Dream tracks/milestones")
     status: Optional[str] = Field(default="", description="Current status of the dream")
+    enriched_context: Optional[Dict[str, Any]] = Field(None, description="Voice conversation context (timeline, motivation, etc.)")
 
 
 @router.post("/create", status_code=201, tags=["dreams"])
