@@ -1,3 +1,88 @@
+# Backend Integration Guide - Voice Conversation
+
+**For:** PacksLight---Expo-Backend
+**LangGraph:** Voice conversation node integrated in workflow
+**Your Role:** Handle STT/TTS and stream to/from LangGraph
+
+---
+
+## Architecture Overview
+
+```
+Frontend (React Native)
+    ↓ WebSocket
+Backend (You)
+    ↓ 1. STT (Whisper): audio → text
+    ↓ 2. Call LangGraph with text
+    ↓ 3. Get AI response text
+    ↓ 4. TTS (Eleven Labs): text → audio
+    ↓ WebSocket
+Frontend (React Native)
+```
+
+The LangGraph workflow now handles the conversation logic. You just handle:
+1. **Speech-to-Text** (Whisper)
+2. **Text-to-Speech** (Eleven Labs)
+3. **Streaming** between frontend and LangGraph
+
+---
+
+## LangGraph Workflow Changes
+
+### New Flow in build.py
+
+```
+Entry Point (conditional)
+    ↓
+    ├─ If user_request → architect (TEXT MODE)
+    ├─ If enriched_context → architect (VOICE MODE - context ready)
+    └─ If neither → voice_conversation (VOICE MODE - start conversation)
+            ↓ (loops 2-3 times)
+            enriched_context extracted
+            ↓
+        architect → gamification → image → persistence
+```
+
+The `voice_conversation` node:
+- Takes user messages via state
+- Returns AI responses via state
+- Loops until enriched_context is complete
+- Then routes to architect automatically
+
+---
+
+## Backend Implementation
+
+### 1. Install Dependencies
+
+```bash
+# Add to requirements.txt
+openai>=1.0.0
+elevenlabs>=1.0.0
+httpx>=0.25.2
+```
+
+```bash
+pip install openai elevenlabs httpx
+```
+
+### 2. Environment Variables
+
+```bash
+# Add to .env
+OPENAI_API_KEY=sk-proj-your_key_here
+ELEVENLABS_API_KEY=sk_your_key_here
+ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM  # Rachel voice
+
+# Existing
+LANGGRAPH_AGENT_URL=https://your-langgraph-deployment-url
+```
+
+### 3. Create WebSocket Endpoint
+
+**File:** `PacksLight---Expo-Backend/api/voice.py`
+
+```python
 """
 Voice Assistant WebSocket Endpoint
 
@@ -280,3 +365,103 @@ async def voice_assistant_websocket(websocket: WebSocket, user_id: str):
             await websocket.close()
         except:
             pass
+```
+
+### 4. Register Router
+
+**File:** `PacksLight---Expo-Backend/main.py`
+
+```python
+from api import voice
+
+app.include_router(voice.router, prefix="/api/voice", tags=["voice"])
+```
+
+---
+
+## Testing
+
+### 1. Test STT/TTS
+
+```python
+# Test Whisper
+audio_bytes = open("test.wav", "rb").read()
+text = await transcribe_audio(audio_bytes)
+print(f"Transcribed: {text}")
+
+# Test Eleven Labs
+audio = await text_to_speech("Hello, how are you?")
+open("output.mp3", "wb").write(audio)
+```
+
+### 2. Test WebSocket
+
+```python
+import websockets
+import json
+import base64
+
+async def test():
+    uri = "ws://localhost:8000/api/voice/ws/test_user"
+    async with websockets.connect(uri) as ws:
+        # Receive greeting
+        msg = await ws.recv()
+        print(json.loads(msg))
+
+        # Send audio
+        audio = open("user_audio.wav", "rb").read()
+        await ws.send(json.dumps({
+            "type": "audio",
+            "data": base64.b64encode(audio).decode()
+        }))
+
+        # Receive response
+        msg = await ws.recv()
+        print(json.loads(msg))
+```
+
+---
+
+## WebSocket Protocol
+
+### Client → Server
+
+```json
+{"type": "audio", "data": "base64_wav_audio"}
+{"type": "end"}
+```
+
+### Server → Client
+
+```json
+{"type": "audio", "data": "base64_mp3_audio"}
+{"type": "text", "text": "AI message"}
+{"type": "user_transcript", "text": "What user said"}
+{"type": "turn_complete"}
+{"type": "workflow_complete", "roadmap": {...}, "status": "completed"}
+{"type": "error", "message": "Error description"}
+```
+
+---
+
+## Cost Per Conversation
+
+- Whisper STT: $0.02
+- Claude 3.5 Sonnet: $0.003
+- Eleven Labs TTS: $0.10
+- **Total: ~$0.13**
+
+---
+
+## Next Steps
+
+1. ✅ LangGraph workflow updated (voice node added)
+2. ⏳ Implement WebSocket endpoint in backend
+3. ⏳ Add OpenAI/Eleven Labs API keys
+4. ⏳ Test STT/TTS
+5. ⏳ Test full flow
+6. ⏳ Frontend integration
+
+---
+
+**Ready to implement!** See [FRONTEND_INTEGRATION_FINAL.md](FRONTEND_INTEGRATION_FINAL.md) for frontend guide.
