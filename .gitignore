@@ -144,6 +144,15 @@ ENV/
 env.bak/
 venv.bak/
 
+# Firebase/Google Cloud credentials (NEVER COMMIT THESE!)
+credentials/
+*.json
+!package.json
+!package-lock.json
+firebase-admin-key.json
+google-services.json
+GoogleService-Info.plist
+
 # Spyder project settings
 .spyderproject
 .spyproject

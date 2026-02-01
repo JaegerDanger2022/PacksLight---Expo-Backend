@@ -155,6 +155,14 @@ class VoiceAssistantSession:
             ) as session:
                 logger.info("🎤 Gemini Live session started")
 
+                # Send initial prompt to trigger AI greeting
+                # This makes the AI speak first instead of waiting for user input
+                await session.send(
+                    input="Start the conversation with your greeting.",
+                    end_of_turn=True
+                )
+                logger.info("🎙️ Sent initial prompt to trigger AI greeting")
+
                 # Create tasks for bidirectional streaming
                 send_task = asyncio.create_task(
                     self._send_audio_from_client(websocket, session)
