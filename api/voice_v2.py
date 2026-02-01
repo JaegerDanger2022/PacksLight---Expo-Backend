@@ -123,7 +123,10 @@ async def call_langgraph_voice_node(
     user_id: Optional[str] = None
 ) -> dict:
     """
-    Call LangGraph voice conversation node.
+    Call LangGraph voice_conversation graph for one turn of conversation.
+
+    The voice_conversation graph is a standalone graph (separate from main workflow)
+    that processes one conversation turn and returns immediately.
 
     Args:
         thread_id: LangGraph thread ID
@@ -141,8 +144,11 @@ async def call_langgraph_voice_node(
         # Prepare payload
         payload = {
             "input": {
-                "user_message": user_message,
-                "user_id": user_id
+                "user_id": user_id,
+                "user_message": user_message,  # None for greeting, string for subsequent turns
+                "messages": [],
+                "enriched_context": None,
+                "turn_count": 0
             },
             "config": {
                 "configurable": {
@@ -151,7 +157,7 @@ async def call_langgraph_voice_node(
             }
         }
 
-        # Call LangGraph voice node
+        # Call voice_conversation graph
         response = await client.post(
             f"{LANGGRAPH_AGENT_URL}/voice_conversation/invoke",
             headers={"x-api-key": LANGGRAPH_API_KEY},
@@ -162,10 +168,25 @@ async def call_langgraph_voice_node(
         result = response.json()
         output = result.get("output", {})
 
+        # Extract AI response from messages
+        messages = output.get("messages", [])
+        ai_response = ""
+        if messages:
+            # Get last message (AI response)
+            last_message = messages[-1]
+            if isinstance(last_message, dict):
+                ai_response = last_message.get("content", "")
+            else:
+                # Handle serialized message object as string
+                ai_response = str(last_message)
+
+        # Check if context extracted
+        enriched_context = output.get("enriched_context")
+
         return {
-            "ai_response": output.get("message", ""),
-            "context_extracted": output.get("context_extracted", False),
-            "enriched_context": output.get("enriched_context")
+            "ai_response": ai_response,
+            "context_extracted": enriched_context is not None,
+            "enriched_context": enriched_context
         }
 
 
