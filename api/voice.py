@@ -273,6 +273,12 @@ class VoiceAssistantSession:
                             })
                             logger.info(f"📝 Sent text response: {part.text[:50]}...")
 
+                    # Signal that this turn is complete (all parts sent)
+                    await websocket.send_json({
+                        "type": "turn_complete"
+                    })
+                    logger.info("✅ Turn complete signal sent")
+
         except Exception as e:
             logger.error(f"Error receiving from Gemini: {e}", exc_info=True)
 
