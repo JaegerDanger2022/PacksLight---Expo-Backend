@@ -77,53 +77,41 @@ RULES:
 # FUNCTION DECLARATION FOR CONTEXT EXTRACTION
 # ============================================================================
 
-END_CONVERSATION_TOOL = {
-    "name": "end_conversation",
-    "description": "Call this when you have gathered enough context about the user's dream. Required after introduction and 1-2 clarifying questions.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "user_dream": {
-                "type": "string",
-                "description": "The goal/dream the user shared in their own words"
-            },
-            "timeline_preference": {
-                "type": "string",
-                "enum": ["immediate", "few_months", "year_plus", "exploring", "not_mentioned"],
-                "description": "When user wants to achieve this"
-            },
-            "experience_level": {
-                "type": "string",
-                "enum": ["complete_beginner", "some_experience", "intermediate", "not_mentioned"],
-                "description": "User's familiarity with this domain"
-            },
-            "primary_motivation": {
-                "type": "string",
-                "description": "Why the user wants this (exact words if possible, or 'not_mentioned')"
-            },
-            "specific_focus": {
-                "type": "string",
-                "description": "Any specific aspect they mentioned (e.g., 'travel vlogs' for YouTube channel), or empty string if none"
-            },
-            "concerns": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Any blockers or worries mentioned (empty array if none)"
-            },
-            "conversation_summary": {
-                "type": "string",
-                "description": "2-3 sentence summary of the conversation for context"
-            }
-        },
-        "required": [
-            "user_dream",
-            "timeline_preference",
-            "experience_level",
-            "primary_motivation",
-            "conversation_summary"
-        ]
+def end_conversation(
+    user_dream: str,
+    timeline_preference: str,
+    experience_level: str,
+    primary_motivation: str,
+    conversation_summary: str,
+    specific_focus: str = "",
+    concerns: list[str] = None
+):
+    """
+    Call this when you have gathered enough context about the user's dream.
+    Required after introduction and 1-2 clarifying questions.
+
+    Args:
+        user_dream: The goal/dream the user shared in their own words
+        timeline_preference: When user wants to achieve this (immediate, few_months, year_plus, exploring, not_mentioned)
+        experience_level: User's familiarity with this domain (complete_beginner, some_experience, intermediate, not_mentioned)
+        primary_motivation: Why the user wants this (exact words if possible, or 'not_mentioned')
+        conversation_summary: 2-3 sentence summary of the conversation for context
+        specific_focus: Any specific aspect they mentioned (e.g., 'travel vlogs' for YouTube channel), or empty string if none
+        concerns: Any blockers or worries mentioned (empty list if none)
+    """
+    if concerns is None:
+        concerns = []
+
+    return {
+        "user_dream": user_dream,
+        "timeline_preference": timeline_preference,
+        "experience_level": experience_level,
+        "primary_motivation": primary_motivation,
+        "specific_focus": specific_focus,
+        "concerns": concerns,
+        "conversation_summary": conversation_summary,
+        "user_engaged": True
     }
-}
 
 
 # ============================================================================
@@ -150,7 +138,7 @@ class VoiceAssistantSession:
         """
         config = {
             "system_instruction": VOICE_ASSISTANT_INSTRUCTION,
-            "tools": [END_CONVERSATION_TOOL],
+            "tools": [end_conversation],
             "response_modalities": ["AUDIO"],
         }
 
@@ -228,11 +216,12 @@ class VoiceAssistantSession:
                         if hasattr(part, 'function_call'):
                             func_call = part.function_call
                             if func_call.name == "end_conversation":
+                                # Extract arguments and call the function to get enriched context
                                 args = dict(func_call.args)
                                 logger.info(f"📦 Extracted context: {json.dumps(args, indent=2)}")
 
-                                # Format and return enriched context
-                                enriched_context = self._format_enriched_context(args)
+                                # Call the function to get formatted context
+                                enriched_context = end_conversation(**args)
 
                                 # Notify client
                                 await websocket.send_json({
@@ -266,19 +255,6 @@ class VoiceAssistantSession:
             logger.error(f"Error receiving from Gemini: {e}", exc_info=True)
 
         return None
-
-    def _format_enriched_context(self, args: dict) -> dict:
-        """Format function call arguments into enriched_context."""
-        return {
-            "user_dream": args.get("user_dream", ""),
-            "timeline_preference": args.get("timeline_preference", "not_mentioned"),
-            "experience_level": args.get("experience_level", "not_mentioned"),
-            "primary_motivation": args.get("primary_motivation", "not_mentioned"),
-            "specific_focus": args.get("specific_focus", ""),
-            "concerns": args.get("concerns", []),
-            "conversation_summary": args.get("conversation_summary", ""),
-            "user_engaged": True
-        }
 
 
 # ============================================================================
