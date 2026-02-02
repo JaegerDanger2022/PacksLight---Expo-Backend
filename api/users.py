@@ -87,35 +87,13 @@ async def get_user(user_id: str, fields: Optional[UserFieldsLevel] = UserFieldsL
 
         # Use MongoDB projection for performance instead of fetching all and filtering
         if fields == UserFieldsLevel.minimal:
-            # Projection for minimal fields only
+            # Projection for minimal fields only (exclusion-only projection)
             projection = {
-                "_id": 1,
-                "user_id": 1,
-                "email": 1,
-                "firstname": 1,
-                "lastname": 1,
-                "created_at": 1,
-                # Exclude everything else
                 "dreams": 0
             }
         elif fields == UserFieldsLevel.essential:
-            # Projection for essential fields (DEFAULT)
+            # Projection for essential fields (DEFAULT) - exclusion-only projection
             projection = {
-                "_id": 1,
-                "user_id": 1,
-                "email": 1,
-                "firstname": 1,
-                "lastname": 1,
-                "created_at": 1,
-                "updated_at": 1,
-                "up_next": 1,
-                "streak": 1,
-                "recents": 1,
-                "couragePoints": 1,
-                "last_activity": 1,
-                "communityProfile": 1,
-                "communityStats": 1,
-                # Exclude heavy fields
                 "dreams": 0
             }
         else:  # fields == UserFieldsLevel.full
