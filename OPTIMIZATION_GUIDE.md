@@ -65,37 +65,18 @@ async def get_user(user_id: str, fields: Optional[UserFieldsLevel] = UserFieldsL
         logger.info(f"Fetching user: {user_id} (fields: {fields})")
 
         # Use MongoDB projection for performance instead of fetching all and filtering
+        # IMPORTANT: MongoDB doesn't allow mixing inclusion and exclusion (except _id)
+        # So we use exclusion-only projections to exclude the heavy 'dreams' field
+
         if fields == UserFieldsLevel.minimal:
-            # Projection for minimal fields only
+            # Exclusion projection - only exclude dreams (lightest)
             projection = {
-                "_id": 1,
-                "user_id": 1,
-                "email": 1,
-                "firstname": 1,
-                "lastname": 1,
-                "created_at": 1,
-                # Exclude everything else
-                "dreams": 0
+                "dreams": 0  # Exclude dreams array
             }
         elif fields == UserFieldsLevel.essential:
-            # Projection for essential fields (DEFAULT)
+            # Exclusion projection - only exclude dreams (DEFAULT)
             projection = {
-                "_id": 1,
-                "user_id": 1,
-                "email": 1,
-                "firstname": 1,
-                "lastname": 1,
-                "created_at": 1,
-                "updated_at": 1,
-                "up_next": 1,
-                "streak": 1,
-                "recents": 1,
-                "couragePoints": 1,
-                "last_activity": 1,
-                "communityProfile": 1,
-                "communityStats": 1,
-                # Exclude heavy fields
-                "dreams": 0
+                "dreams": 0  # Exclude dreams array
             }
         else:  # fields == UserFieldsLevel.full
             # No projection - return everything (current behavior)
@@ -412,7 +393,21 @@ GET /api/users/ABC123/dreams/thread-id-xyz
 
 ---
 
-## MongoDB Projection Benefits
+## MongoDB Projection Notes
+
+### Important Limitation
+MongoDB doesn't allow mixing inclusion (`field: 1`) and exclusion (`field: 0`) projections in the same query, except for the `_id` field. This means:
+
+- **WRONG**: `{"user_id": 1, "email": 1, "dreams": 0}` ❌ (Cannot mix inclusion and exclusion)
+- **CORRECT**: `{"dreams": 0}` ✅ (Exclusion only - returns everything except dreams)
+- **CORRECT**: `{"user_id": 1, "email": 1}` ✅ (Inclusion only - returns only these fields)
+
+For this optimization, we use **exclusion-only projections** because:
+1. We want most fields (user info, streak, up_next, etc.)
+2. We only want to exclude the heavy `dreams` array
+3. Exclusion syntax is simpler: `{"dreams": 0}`
+
+### Performance Benefits
 
 Using MongoDB projections (`find_one(query, projection)`) instead of fetching the full document and filtering in Python provides:
 
