@@ -3,6 +3,7 @@ import json
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -78,6 +79,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# GZip compression middleware for large JSON responses
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include routers
 app.include_router(users_router, prefix="/api/users", tags=["users"])

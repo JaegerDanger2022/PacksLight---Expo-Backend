@@ -4,6 +4,8 @@ Users API endpoints - Retrieve and create user data from MongoDB
 
 import logging
 import base64
+from enum import Enum
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
@@ -12,6 +14,13 @@ from core.database import get_db
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class UserFieldsLevel(str, Enum):
+    """Field selection levels for user data"""
+    minimal = "minimal"      # Only basic user info
+    essential = "essential"  # Basic + up_next + streak + recents (DEFAULT)
+    full = "full"           # All data including full dreams array
 
 
 class CreateUserRequest(BaseModel):
@@ -53,15 +62,16 @@ class UpdateStreakRequest(BaseModel):
 
 
 @router.get("/{user_id}", tags=["users"])
-async def get_user(user_id: str):
+async def get_user(user_id: str, fields: Optional[UserFieldsLevel] = UserFieldsLevel.essential):
     """
-    Get a user by user_id from the users collection.
+    Get a user by user_id from the users collection with optional field filtering.
 
     Args:
         user_id: The user's unique identifier (string)
+        fields: Field selection level (minimal, essential, full). Defaults to 'essential'.
 
     Returns:
-        dict: The complete user document
+        dict: The user document (filtered based on 'fields' parameter)
 
     Raises:
         404: User not found
@@ -73,10 +83,50 @@ async def get_user(user_id: str):
         raise HTTPException(status_code=500, detail="Database connection failed")
 
     try:
-        logger.info(f"Fetching user: {user_id}")
+        logger.info(f"Fetching user: {user_id} (fields: {fields})")
 
-        # Query the users collection by user_id field
-        user = await db.users.find_one({"user_id": user_id})
+        # Use MongoDB projection for performance instead of fetching all and filtering
+        if fields == UserFieldsLevel.minimal:
+            # Projection for minimal fields only
+            projection = {
+                "_id": 1,
+                "user_id": 1,
+                "email": 1,
+                "firstname": 1,
+                "lastname": 1,
+                "created_at": 1,
+                # Exclude everything else
+                "dreams": 0
+            }
+        elif fields == UserFieldsLevel.essential:
+            # Projection for essential fields (DEFAULT)
+            projection = {
+                "_id": 1,
+                "user_id": 1,
+                "email": 1,
+                "firstname": 1,
+                "lastname": 1,
+                "created_at": 1,
+                "updated_at": 1,
+                "up_next": 1,
+                "streak": 1,
+                "recents": 1,
+                "couragePoints": 1,
+                "last_activity": 1,
+                "communityProfile": 1,
+                "communityStats": 1,
+                # Exclude heavy fields
+                "dreams": 0
+            }
+        else:  # fields == UserFieldsLevel.full
+            # No projection - return everything (current behavior)
+            projection = None
+
+        # Query with projection
+        if projection:
+            user = await db.users.find_one({"user_id": user_id}, projection)
+        else:
+            user = await db.users.find_one({"user_id": user_id})
 
         if user is None:
             logger.warning(f"User not found: {user_id}")
@@ -89,8 +139,21 @@ async def get_user(user_id: str):
         if "_id" in user:
             user["_id"] = str(user["_id"])
 
-        # Convert image bytes to base64 for JSON serialization and frontend consumption
-        if "dreams" in user and isinstance(user["dreams"], list):
+        # For essential/minimal, add dreams count without returning full array
+        if fields != UserFieldsLevel.full:
+            # Get just the count with a separate aggregation query
+            count_result = await db.users.aggregate([
+                {"$match": {"user_id": user_id}},
+                {"$project": {"dreams_count": {"$size": {"$ifNull": ["$dreams", []]}}}},
+            ]).to_list(1)
+
+            if count_result:
+                user["dreams_count"] = count_result[0].get("dreams_count", 0)
+            else:
+                user["dreams_count"] = 0
+
+        # Convert image bytes to base64 ONLY if we have dreams (full mode)
+        if fields == UserFieldsLevel.full and "dreams" in user and isinstance(user["dreams"], list):
             for dream in user["dreams"]:
                 if isinstance(dream, dict) and "dream_image_bytes" in dream:
                     image_bytes = dream["dream_image_bytes"]
@@ -98,7 +161,7 @@ async def get_user(user_id: str):
                         # Convert binary bytes to base64 string
                         dream["dream_image_bytes"] = base64.b64encode(image_bytes).decode('utf-8')
 
-        logger.info(f"Successfully retrieved user: {user_id}")
+        logger.info(f"Successfully retrieved user: {user_id} (fields: {fields})")
         return user
 
     except HTTPException:
@@ -713,4 +776,184 @@ async def get_streak(user_id: str):
         raise HTTPException(
             status_code=500,
             detail="Internal server error while fetching streak"
+        )
+
+
+@router.get("/{user_id}/dreams", tags=["users"])
+async def get_user_dreams(
+    user_id: str,
+    summary: bool = False,
+    page: int = 1,
+    limit: int = 10
+):
+    """
+    Get user's dreams list with optional summary mode and pagination.
+
+    Args:
+        user_id: The user's unique identifier
+        summary: If True, returns only summary info without full roadmaps (default: False)
+        page: Page number for pagination (default: 1)
+        limit: Number of dreams per page (default: 10)
+
+    Returns:
+        list: Array of dream objects (full or summary based on 'summary' flag)
+
+    Raises:
+        404: User not found
+        500: Database error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database not connected")
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        logger.info(f"Fetching dreams for user: {user_id} (summary: {summary}, page: {page}, limit: {limit})")
+
+        # Find user
+        user = await db.users.find_one({"user_id": user_id})
+
+        if user is None:
+            logger.warning(f"User not found: {user_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User with id '{user_id}' not found"
+            )
+
+        dreams = user.get("dreams", [])
+
+        if summary:
+            # Return summary info only (no full roadmaps)
+            dreams_summary = []
+            for dream in dreams:
+                if isinstance(dream, dict):
+                    # Calculate progress without sending full roadmap
+                    milestones = dream.get("roadmap", {}).get("milestones", [])
+                    total_milestones = len(milestones)
+                    completed_milestones = sum(
+                        1 for m in milestones
+                        if isinstance(m, dict) and m.get("status") == "completed"
+                    )
+
+                    dreams_summary.append({
+                        "dream": dream.get("dream"),
+                        "thread_id": dream.get("thread_id"),
+                        "status": dream.get("status"),
+                        "created_at": dream.get("created_at"),
+                        "updated_at": dream.get("updated_at"),
+                        "category": dream.get("category"),
+                        "isComplete": dream.get("isComplete", False),
+                        # Progress metrics without full data
+                        "milestones_count": total_milestones,
+                        "completed_milestones_count": completed_milestones,
+                        "completion_percentage": (
+                            round((completed_milestones / total_milestones) * 100, 1)
+                            if total_milestones > 0 else 0
+                        ),
+                        # Include base64 image if it exists
+                        "dream_image_bytes": (
+                            base64.b64encode(dream["dream_image_bytes"]).decode('utf-8')
+                            if "dream_image_bytes" in dream and isinstance(dream["dream_image_bytes"], bytes)
+                            else None
+                        )
+                    })
+
+            dreams_to_return = dreams_summary
+        else:
+            # Return full dreams with roadmaps, but still convert image bytes
+            for dream in dreams:
+                if isinstance(dream, dict) and "dream_image_bytes" in dream:
+                    image_bytes = dream["dream_image_bytes"]
+                    if isinstance(image_bytes, bytes):
+                        dream["dream_image_bytes"] = base64.b64encode(image_bytes).decode('utf-8')
+
+            dreams_to_return = dreams
+
+        # Apply pagination
+        skip = (page - 1) * limit
+        paginated_dreams = dreams_to_return[skip:skip + limit]
+
+        logger.info(f"Successfully retrieved {len(paginated_dreams)} dreams for user: {user_id}")
+
+        return {
+            "dreams": paginated_dreams,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": len(dreams_to_return),
+                "totalPages": (len(dreams_to_return) + limit - 1) // limit
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching dreams for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while fetching dreams"
+        )
+
+
+@router.get("/{user_id}/dreams/{thread_id}", tags=["users"])
+async def get_dream_details(user_id: str, thread_id: str):
+    """
+    Get a single dream's full details including roadmap and milestones.
+
+    Use this endpoint when the user navigates to a specific dream detail screen
+    to avoid loading all dreams with roadmaps upfront.
+
+    Args:
+        user_id: The user's unique identifier
+        thread_id: The dream's thread ID
+
+    Returns:
+        dict: The complete dream object with roadmap
+
+    Raises:
+        404: User or dream not found
+        500: Database error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database not connected")
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        logger.info(f"Fetching dream details: {thread_id} for user: {user_id}")
+
+        # Use aggregation to find the specific dream directly
+        pipeline = [
+            {"$match": {"user_id": user_id}},
+            {"$unwind": "$dreams"},
+            {"$match": {"dreams.thread_id": thread_id}},
+            {"$replaceRoot": {"newRoot": "$dreams"}}
+        ]
+
+        cursor = db.users.aggregate(pipeline)
+        dreams = await cursor.to_list(length=1)
+
+        if not dreams:
+            logger.warning(f"Dream not found: {thread_id} for user: {user_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Dream with thread_id '{thread_id}' not found for user '{user_id}'"
+            )
+
+        dream = dreams[0]
+
+        # Convert image bytes to base64 if present
+        if "dream_image_bytes" in dream and isinstance(dream["dream_image_bytes"], bytes):
+            dream["dream_image_bytes"] = base64.b64encode(dream["dream_image_bytes"]).decode('utf-8')
+
+        logger.info(f"Successfully retrieved dream: {thread_id}")
+        return dream
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching dream {thread_id} for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while fetching dream details"
         )
