@@ -189,6 +189,23 @@ async def create_indexes():
         await db.journey_recaps.create_index([("userId", 1), ("dreamId", 1)], unique=True)
         logger.info("[DB] Index created: journey_recaps (userId, dreamId) - ensures one recap per dream")
 
+        # ============= DREAMS COLLECTION INDEXES (NEW) =============
+        logger.info("[DB] Creating index: dreams.user_id")
+        await db.dreams.create_index("user_id")
+        logger.info("[DB] Index created: dreams.user_id")
+
+        logger.info("[DB] Creating index: dreams.thread_id (unique)")
+        await db.dreams.create_index("thread_id", unique=True)
+        logger.info("[DB] Index created: dreams.thread_id")
+
+        logger.info("[DB] Creating compound index: dreams (user_id, status)")
+        await db.dreams.create_index([("user_id", 1), ("status", 1)])
+        logger.info("[DB] Index created: dreams (user_id, status)")
+
+        logger.info("[DB] Creating compound index: dreams (user_id, updated_at)")
+        await db.dreams.create_index([("user_id", 1), ("updated_at", -1)])
+        logger.info("[DB] Index created: dreams (user_id, updated_at)")
+
         logger.info("[DB] All database indexes created successfully")
     except Exception as e:
         logger.error(f"[DB] Failed to create indexes: {e}", exc_info=True)
