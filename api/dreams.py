@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any
 import httpx
+from core.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,37 @@ async def create_dream(dream_data: CreateDreamRequest):
     """
     try:
         logger.info(f"Processing dream for user: {dream_data.user_id}")
+
+        # --- Dream limit gate ---
+        db = get_db()
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+
+        user = await db.users.find_one({"user_id": dream_data.user_id})
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        plan = user.get("plan", "free")
+
+        if plan == "free":
+            # Free: hard cap of 2 dreams total (active + completed)
+            total_dreams = await db.dreams.count_documents({"user_id": dream_data.user_id})
+            if total_dreams >= 2:
+                logger.warning(f"Free user {dream_data.user_id} hit dream limit ({total_dreams} total)")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Dream limit reached. Upgrade to Pro to create more dreams."
+                )
+        else:
+            # Pro: max 3 active dreams (completed don't count)
+            active_dreams = await db.dreams.count_documents({"user_id": dream_data.user_id, "status": "active"})
+            if active_dreams >= 3:
+                logger.warning(f"Pro user {dream_data.user_id} hit active dream limit ({active_dreams} active)")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Active dream limit reached. Complete or delete a dream to create a new one."
+                )
+        # --- End limit gate ---
 
         # Get environment variables
         langgraph_url = os.getenv("LANGGRAPH_AGENT_URL")

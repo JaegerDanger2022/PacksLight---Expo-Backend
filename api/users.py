@@ -151,6 +151,8 @@ async def register_user(user_data: CreateUserRequest):
             "lastname": user_data.lastname,
             "created_at": datetime.now(timezone.utc),
             "couragePoints": 0,
+            "plan": "free",
+            "dreams_metadata": [],
             "communityProfile": {
                 "location": None,
                 "age": None,
@@ -708,4 +710,60 @@ async def get_streak(user_id: str):
             detail="Internal server error while fetching streak"
         )
 
+
+class UpdatePlanRequest(BaseModel):
+    """Request schema for updating a user's plan"""
+    plan: str = Field(..., description="Plan tier ('free' or 'pro')")
+
+
+@router.patch("/{user_id}/plan", status_code=200, tags=["users"])
+async def update_plan(user_id: str, update_data: UpdatePlanRequest):
+    """
+    Update a user's subscription plan.
+
+    Called by the frontend after a successful RevenueCat purchase or restore.
+
+    Args:
+        user_id: The user's unique identifier (Firebase UID)
+        update_data: Request body containing the new plan tier
+
+    Returns:
+        dict: Success status and updated plan
+
+    Raises:
+        400: Invalid plan value
+        404: User not found
+        500: Database error
+    """
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    valid_plans = ["free", "pro"]
+    if update_data.plan not in valid_plans:
+        raise HTTPException(status_code=400, detail=f"Invalid plan. Must be one of: {valid_plans}")
+
+    try:
+        result = await db.users.find_one_and_update(
+            {"user_id": user_id},
+            {"$set": {"plan": update_data.plan}},
+            return_document=True
+        )
+
+        if result is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        logger.info(f"Updated plan for user {user_id} to: {update_data.plan}")
+
+        return {
+            "success": True,
+            "message": f"Plan updated to {update_data.plan}",
+            "plan": update_data.plan
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating plan for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error while updating plan")
 

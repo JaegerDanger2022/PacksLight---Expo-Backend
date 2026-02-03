@@ -262,6 +262,17 @@ async def update_dream(thread_id: str, update_data: UpdateDreamRequest):
                 {"$set": summary_update}
             )
 
+        # Sync status change to dreams_metadata on user doc
+        if update_data.status:
+            metadata_update = {"dreams_metadata.$.status": update_data.status}
+            if update_data.status == "completed":
+                metadata_update["dreams_metadata.$.completed_at"] = datetime.now(timezone.utc).isoformat()
+
+            await db.users.update_one(
+                {"user_id": dream["user_id"], "dreams_metadata.thread_id": thread_id},
+                {"$set": metadata_update}
+            )
+
         logger.info(f"Successfully updated dream: {thread_id}")
 
         return {
@@ -319,10 +330,13 @@ async def delete_dream(thread_id: str):
         # Delete from dreams collection
         await db.dreams.delete_one({"thread_id": thread_id})
 
-        # Remove from user's dreams_summary (if exists)
+        # Remove from user's dreams_summary and dreams_metadata
         await db.users.update_one(
             {"user_id": user_id},
-            {"$pull": {"dreams_summary": {"thread_id": thread_id}}}
+            {"$pull": {
+                "dreams_summary": {"thread_id": thread_id},
+                "dreams_metadata": {"thread_id": thread_id},
+            }}
         )
 
         logger.info(f"Successfully deleted dream: {thread_id}")

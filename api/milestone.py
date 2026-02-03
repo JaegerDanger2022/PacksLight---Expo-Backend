@@ -167,6 +167,16 @@ async def update_milestone_status(
             )
             logger.info(f"Updated dream metadata: score={new_score}, total_xp={total_xp}, isComplete={is_complete}")
 
+            # Sync completion to dreams_metadata on the user doc
+            if is_complete:
+                await db.users.update_one(
+                    {"user_id": user_id, "dreams_metadata.thread_id": thread_id},
+                    {"$set": {
+                        "dreams_metadata.$.status": "completed",
+                        "dreams_metadata.$.completed_at": dream_update_fields["completed_at"],
+                    }}
+                )
+
         logger.info(f"Successfully updated milestone {milestone_id} to status: {update_data.status}")
 
         # Build milestone response data
