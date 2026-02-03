@@ -94,7 +94,7 @@ async def update_milestone_status(
                 roadmap_status = dream.get("roadmap", {}).get("status")
                 if roadmap_status != "started":
                     logger.info(f"Roadmap status is '{roadmap_status}', setting to 'started'")
-                    # Update roadmap status to "started"
+                    # Update roadmap status to "started" — users collection (embedded array)
                     await db.users.update_one(
                         {
                             "user_id": user_id,
@@ -108,6 +108,11 @@ async def update_milestone_status(
                         array_filters=[
                             {"d.thread_id": thread_id}
                         ]
+                    )
+                    # Mirror to dreams collection
+                    await db.dreams.update_one(
+                        {"thread_id": thread_id},
+                        {"$set": {"roadmap.status": "started"}}
                     )
                 break
 
@@ -155,6 +160,26 @@ async def update_milestone_status(
                 status_code=500,
                 detail=f"Failed to update milestone"
             )
+
+        # Mirror milestone status update to dreams collection
+        dreams_milestone_fields = {
+            "roadmap.milestones.$[m].status": update_data.status
+        }
+        if update_data.status == "completed":
+            dreams_milestone_fields["roadmap.milestones.$[m].completedDate"] = update_fields.get(
+                "dreams.$[d].roadmap.milestones.$[m].completedDate",
+                datetime.now(timezone.utc).isoformat()
+            )
+        if update_data.evidence is not None:
+            dreams_milestone_fields["roadmap.milestones.$[m].evidence"] = update_data.evidence
+        if update_data.impact is not None and update_data.impact in ["critical", "high", "medium", "low"]:
+            dreams_milestone_fields["roadmap.milestones.$[m].impact"] = update_data.impact
+
+        await db.dreams.update_one(
+            {"thread_id": thread_id},
+            {"$set": dreams_milestone_fields},
+            array_filters=[{"m.id": milestone_id}]
+        )
 
         # Find the updated milestone from the result
         updated_dream = next(
@@ -217,6 +242,22 @@ async def update_milestone_status(
                     {"d.thread_id": thread_id}
                 ]
             )
+
+            # Mirror metadata + completion fields to dreams collection
+            dreams_dream_fields = {
+                "metadata.score": new_score,
+                "metadata.total_xp": total_xp,
+            }
+            if is_complete:
+                dreams_dream_fields["isComplete"] = True
+                dreams_dream_fields["completed_at"] = update_dream_fields["dreams.$[d].completed_at"]
+                dreams_dream_fields["status"] = "completed"
+
+            await db.dreams.update_one(
+                {"thread_id": thread_id},
+                {"$set": dreams_dream_fields}
+            )
+            logger.info(f"Mirrored metadata to dreams collection: score={new_score}, total_xp={total_xp}, isComplete={is_complete}")
 
         logger.info(f"Successfully updated milestone {milestone_id} to status: {update_data.status}")
 
