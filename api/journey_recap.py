@@ -55,18 +55,9 @@ async def create_journey_recap(
 
         logger.info(f"Creating journey recap for dream {journey_data.dreamId} by user {user_id}")
 
-        # 1. Verify user and dream exist
-        user_doc = await db.users.find_one(
-            {"user_id": user_id, "dreams.thread_id": journey_data.dreamId}
-        )
-
-        if not user_doc:
-            raise HTTPException(status_code=404, detail="User or dream not found")
-
-        # 2. Find the dream
-        dream = next(
-            (d for d in user_doc.get("dreams", []) if d.get("thread_id") == journey_data.dreamId),
-            None
+        # 1. Verify dream exists in the dreams collection
+        dream = await db.dreams.find_one(
+            {"thread_id": journey_data.dreamId, "user_id": user_id}
         )
 
         if not dream:
@@ -118,10 +109,15 @@ async def create_journey_recap(
         user_age = None
 
         if not journey_data.isAnonymous:
-            user_display_name = user_doc.get("firstname", "User")
-            community_profile = user_doc.get("communityProfile", {})
-            user_location = community_profile.get("location")
-            user_age = community_profile.get("age")
+            user_doc = await db.users.find_one(
+                {"user_id": user_id},
+                {"firstname": 1, "communityProfile": 1}
+            )
+            if user_doc:
+                user_display_name = user_doc.get("firstname", "User")
+                community_profile = user_doc.get("communityProfile", {})
+                user_location = community_profile.get("location")
+                user_age = community_profile.get("age")
 
         # 7. Create journey recap document
         journey_recap = {

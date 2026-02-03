@@ -218,34 +218,23 @@ async def create_victory(victory_data: CreateVictoryRequest):
     try:
         db = get_db()
 
-        # 1. Find the milestone in the user's dreams
-        # We need to search through all users to find the milestone
-        user_with_milestone = await db.users.find_one({
-            "dreams.roadmap.milestones.id": victory_data.milestoneId
+        # 1. Find the dream containing the milestone
+        dream = await db.dreams.find_one({
+            "roadmap.milestones.id": victory_data.milestoneId
         })
 
-        if not user_with_milestone:
+        if not dream:
             raise HTTPException(status_code=404, detail="Milestone not found")
 
-        # 2. Extract milestone and dream data
-        milestone = None
-        dream = None
+        # 2. Extract milestone from the dream
+        milestone = next(
+            (m for m in dream.get("roadmap", {}).get("milestones", [])
+             if m.get("id") == victory_data.milestoneId),
+            None
+        )
 
-        for dream_item in user_with_milestone.get("dreams", []):
-            roadmap = dream_item.get("roadmap", {})
-            milestones = roadmap.get("milestones", [])
-
-            for m in milestones:
-                if m.get("id") == victory_data.milestoneId:
-                    milestone = m
-                    dream = dream_item
-                    break
-
-            if milestone:
-                break
-
-        if not milestone or not dream:
-            raise HTTPException(status_code=404, detail="Milestone not found in user's dreams")
+        if not milestone:
+            raise HTTPException(status_code=404, detail="Milestone not found in dream")
 
         # 3. Validate milestone is completed
         if milestone.get("status") != "completed":
@@ -257,16 +246,21 @@ async def create_victory(victory_data: CreateVictoryRequest):
             raise HTTPException(status_code=409, detail="Victory already exists for this milestone")
 
         # 5. Extract user data
-        user_id = user_with_milestone["user_id"]
+        user_id = dream["user_id"]
         user_display_name = "Anonymous"
         user_location = None
         user_age = None
 
         if not victory_data.isAnonymous:
-            user_display_name = user_with_milestone.get("firstname", "Anonymous")
-            community_profile = user_with_milestone.get("communityProfile", {})
-            user_location = community_profile.get("location")
-            user_age = community_profile.get("age")
+            user_doc = await db.users.find_one(
+                {"user_id": user_id},
+                {"firstname": 1, "communityProfile": 1}
+            )
+            if user_doc:
+                user_display_name = user_doc.get("firstname", "Anonymous")
+                community_profile = user_doc.get("communityProfile", {})
+                user_location = community_profile.get("location")
+                user_age = community_profile.get("age")
 
         # 6. Determine impact level
         impact_level = victory_data.impact or milestone.get("impact", "high")
@@ -299,17 +293,8 @@ async def create_victory(victory_data: CreateVictoryRequest):
         # 8. Insert into database
         await db.victory_cards.insert_one(victory_card.model_dump())
 
-        # 9. Award +5 courage points to user
+        # 9. Award +5 courage points to user ($inc initializes to 0 if missing)
         courage_points_awarded = 5
-
-        # Initialize couragePoints if it doesn't exist
-        if "couragePoints" not in user_with_milestone:
-            await db.users.update_one(
-                {"user_id": user_id},
-                {"$set": {"couragePoints": 0}}
-            )
-
-        # Update user's courage points
         await db.users.update_one(
             {"user_id": user_id},
             {"$inc": {"couragePoints": courage_points_awarded}}

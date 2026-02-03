@@ -54,140 +54,76 @@ async def update_milestone_status(
 
         logger.info(f"Updating milestone {milestone_id} in dream {thread_id} for user {user_id} to status: {update_data.status}")
 
-        # First verify the document exists
-        verify_doc = await db.users.find_one(
-            {
-                "user_id": user_id,
-                "dreams.thread_id": thread_id
-            }
+        # Verify dream exists in the dreams collection
+        dream_doc = await db.dreams.find_one(
+            {"thread_id": thread_id, "user_id": user_id}
         )
 
-        if not verify_doc:
-            logger.warning(f"User {user_id} with dream {thread_id} not found")
+        if not dream_doc:
+            logger.warning(f"Dream {thread_id} not found for user {user_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"User or dream not found"
+                detail="User or dream not found"
             )
 
         # Verify milestone exists in the dream
-        milestone_found = False
-        for dream in verify_doc.get("dreams", []):
-            if dream.get("thread_id") == thread_id:
-                for milestone in dream.get("roadmap", {}).get("milestones", []):
-                    if milestone.get("id") == milestone_id:
-                        milestone_found = True
-                        break
-                break
+        milestone_found = any(
+            m.get("id") == milestone_id
+            for m in dream_doc.get("roadmap", {}).get("milestones", [])
+        )
 
         if not milestone_found:
             logger.warning(f"Milestone {milestone_id} not found in dream {thread_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Milestone not found"
+                detail="Milestone not found"
             )
 
-        logger.info(f"Found user, dream, and milestone. Proceeding with update.")
+        logger.info(f"Found dream and milestone. Proceeding with update.")
 
         # Check if roadmap status is "started", if not set it
-        for dream in verify_doc.get("dreams", []):
-            if dream.get("thread_id") == thread_id:
-                roadmap_status = dream.get("roadmap", {}).get("status")
-                if roadmap_status != "started":
-                    logger.info(f"Roadmap status is '{roadmap_status}', setting to 'started'")
-                    # Update roadmap status to "started" — users collection (embedded array)
-                    await db.users.update_one(
-                        {
-                            "user_id": user_id,
-                            "dreams.thread_id": thread_id
-                        },
-                        {
-                            "$set": {
-                                "dreams.$[d].roadmap.status": "started"
-                            }
-                        },
-                        array_filters=[
-                            {"d.thread_id": thread_id}
-                        ]
-                    )
-                    # Mirror to dreams collection
-                    await db.dreams.update_one(
-                        {"thread_id": thread_id},
-                        {"$set": {"roadmap.status": "started"}}
-                    )
-                break
+        roadmap_status = dream_doc.get("roadmap", {}).get("status")
+        if roadmap_status != "started":
+            logger.info(f"Roadmap status is '{roadmap_status}', setting to 'started'")
+            await db.dreams.update_one(
+                {"thread_id": thread_id},
+                {"$set": {"roadmap.status": "started"}}
+            )
 
-        # Prepare update data with completedDate timestamp
+        # Prepare milestone update fields
         update_fields = {
-            "dreams.$[d].roadmap.milestones.$[m].status": update_data.status
+            "roadmap.milestones.$[m].status": update_data.status
         }
 
-        # Add completedDate if status is being set to 'completed'
         if update_data.status == "completed":
-            update_fields["dreams.$[d].roadmap.milestones.$[m].completedDate"] = datetime.now(timezone.utc).isoformat()
+            update_fields["roadmap.milestones.$[m].completedDate"] = datetime.now(timezone.utc).isoformat()
 
-        # Add evidence if provided (for community features)
         if update_data.evidence is not None:
-            update_fields["dreams.$[d].roadmap.milestones.$[m].evidence"] = update_data.evidence
+            update_fields["roadmap.milestones.$[m].evidence"] = update_data.evidence
 
-        # Add impact if provided and valid (for community features)
         if update_data.impact is not None:
             valid_impacts = ["critical", "high", "medium", "low"]
             if update_data.impact in valid_impacts:
-                update_fields["dreams.$[d].roadmap.milestones.$[m].impact"] = update_data.impact
+                update_fields["roadmap.milestones.$[m].impact"] = update_data.impact
             else:
                 logger.warning(f"Invalid impact level: {update_data.impact}. Using default.")
 
-        # Update the milestone status using array filters
-        # This uses $set to update ONLY the status field, preserving all other milestone data
-        # Only query by user_id - the array filters will handle the nested matching
-        result = await db.users.find_one_and_update(
-            {
-                "user_id": user_id
-            },
-            {
-                "$set": update_fields
-            },
-            array_filters=[
-                {"d.thread_id": thread_id},
-                {"m.id": milestone_id}
-            ],
+        # Update the milestone in the dreams collection
+        updated_dream = await db.dreams.find_one_and_update(
+            {"thread_id": thread_id},
+            {"$set": update_fields},
+            array_filters=[{"m.id": milestone_id}],
             return_document=True
         )
 
-        if not result:
+        if not updated_dream:
             logger.error(f"Failed to update milestone despite verification passing")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to update milestone"
+                detail="Failed to update milestone"
             )
 
-        # Mirror milestone status update to dreams collection
-        dreams_milestone_fields = {
-            "roadmap.milestones.$[m].status": update_data.status
-        }
-        if update_data.status == "completed":
-            dreams_milestone_fields["roadmap.milestones.$[m].completedDate"] = update_fields.get(
-                "dreams.$[d].roadmap.milestones.$[m].completedDate",
-                datetime.now(timezone.utc).isoformat()
-            )
-        if update_data.evidence is not None:
-            dreams_milestone_fields["roadmap.milestones.$[m].evidence"] = update_data.evidence
-        if update_data.impact is not None and update_data.impact in ["critical", "high", "medium", "low"]:
-            dreams_milestone_fields["roadmap.milestones.$[m].impact"] = update_data.impact
-
-        await db.dreams.update_one(
-            {"thread_id": thread_id},
-            {"$set": dreams_milestone_fields},
-            array_filters=[{"m.id": milestone_id}]
-        )
-
-        # Find the updated milestone from the result
-        updated_dream = next(
-            (dream for dream in result.get("dreams", [])
-             if dream.get("thread_id") == thread_id),
-            None
-        )
-
+        # Find the updated milestone from the returned dream doc
         updated_milestone = next(
             (m for m in updated_dream.get("roadmap", {}).get("milestones", [])
              if m.get("id") == milestone_id),
@@ -197,67 +133,39 @@ async def update_milestone_status(
         # Update dream's metadata.score with milestone xp_points
         xp_points = updated_milestone.get("xp_points", 0)
 
-        if xp_points > 0 and updated_dream:
-            # Check if dream metadata.score exists
+        if xp_points > 0:
             dream_metadata = updated_dream.get("metadata", {})
             current_score = dream_metadata.get("score", None)
 
             if current_score is None:
-                # Score doesn't exist, set it to xp_points (don't increment)
                 new_score = xp_points
                 logger.info(f"Creating dream metadata.score with value {xp_points}")
             else:
-                # Score exists, increment it
                 new_score = current_score + xp_points
                 logger.info(f"Incrementing dream metadata.score from {current_score} to {new_score}")
 
-            # Calculate total XP from all milestones in the dream
             total_xp = sum(
                 m.get("xp_points", 0) for m in updated_dream.get("roadmap", {}).get("milestones", [])
             )
 
-            # Check if dream is complete (score equals total XP)
             is_complete = new_score == total_xp
             logger.info(f"Dream completion check: score={new_score}, total_xp={total_xp}, isComplete={is_complete}")
 
-            # Update the dream's metadata.score and isComplete flag
-            update_dream_fields = {
-                "dreams.$[d].metadata.score": new_score
-            }
-            if is_complete:
-                update_dream_fields["dreams.$[d].isComplete"] = True
-                update_dream_fields["dreams.$[d].completed_at"] = datetime.now(timezone.utc).isoformat()
-                update_dream_fields["dreams.$[d].status"] = "completed"
-                logger.info(f"Dream {thread_id} is now complete! Setting status to completed.")
-
-            await db.users.update_one(
-                {
-                    "user_id": user_id,
-                    "dreams.thread_id": thread_id
-                },
-                {
-                    "$set": update_dream_fields
-                },
-                array_filters=[
-                    {"d.thread_id": thread_id}
-                ]
-            )
-
-            # Mirror metadata + completion fields to dreams collection
-            dreams_dream_fields = {
+            dream_update_fields = {
                 "metadata.score": new_score,
                 "metadata.total_xp": total_xp,
             }
             if is_complete:
-                dreams_dream_fields["isComplete"] = True
-                dreams_dream_fields["completed_at"] = update_dream_fields["dreams.$[d].completed_at"]
-                dreams_dream_fields["status"] = "completed"
+                dream_update_fields["isComplete"] = True
+                dream_update_fields["completed_at"] = datetime.now(timezone.utc).isoformat()
+                dream_update_fields["status"] = "completed"
+                logger.info(f"Dream {thread_id} is now complete! Setting status to completed.")
 
             await db.dreams.update_one(
                 {"thread_id": thread_id},
-                {"$set": dreams_dream_fields}
+                {"$set": dream_update_fields}
             )
-            logger.info(f"Mirrored metadata to dreams collection: score={new_score}, total_xp={total_xp}, isComplete={is_complete}")
+            logger.info(f"Updated dream metadata: score={new_score}, total_xp={total_xp}, isComplete={is_complete}")
 
         logger.info(f"Successfully updated milestone {milestone_id} to status: {update_data.status}")
 
