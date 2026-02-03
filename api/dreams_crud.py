@@ -172,6 +172,21 @@ async def get_dream_by_id(thread_id: str):
         if "dream_image_bytes" in dream and isinstance(dream["dream_image_bytes"], bytes):
             dream["dream_image_bytes"] = base64.b64encode(dream["dream_image_bytes"]).decode('utf-8')
 
+        # Backfill metadata from milestones if not yet present (covers dreams completed
+        # before the milestone endpoint started writing metadata to this collection)
+        if "metadata" not in dream:
+            milestones = dream.get("roadmap", {}).get("milestones", [])
+            total_xp = sum(m.get("xp_points", 0) for m in milestones)
+            score = sum(m.get("xp_points", 0) for m in milestones if m.get("status") == "completed")
+            dream["metadata"] = {"score": score, "total_xp": total_xp}
+
+            # Persist so subsequent fetches don't recompute
+            await db.dreams.update_one(
+                {"thread_id": thread_id},
+                {"$set": {"metadata": dream["metadata"]}}
+            )
+            logger.info(f"Backfilled metadata for dream {thread_id}: score={score}, total_xp={total_xp}")
+
         logger.info(f"Successfully retrieved dream: {thread_id}")
         return dream
 
