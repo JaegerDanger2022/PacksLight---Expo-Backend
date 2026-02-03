@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
+from pymongo.errors import DuplicateKeyError
 from core.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -134,13 +135,22 @@ async def register_user(user_data: CreateUserRequest):
     try:
         logger.info(f"Creating user: {user_data.user_id}")
 
-        # Check if user already exists
+        # Check if user already exists by user_id
         existing_user = await db.users.find_one({"user_id": user_data.user_id})
         if existing_user:
             logger.warning(f"User already exists: {user_data.user_id}")
             raise HTTPException(
                 status_code=400,
                 detail=f"User with id '{user_data.user_id}' already exists"
+            )
+
+        # Check if email is already taken
+        existing_email = await db.users.find_one({"email": user_data.email})
+        if existing_email:
+            logger.warning(f"Email already registered: {user_data.email}")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Email '{user_data.email}' is already registered"
             )
 
         # Create user document
@@ -181,6 +191,12 @@ async def register_user(user_data: CreateUserRequest):
 
     except HTTPException:
         raise
+    except DuplicateKeyError as e:
+        logger.warning(f"Duplicate key error creating user {user_data.user_id}: {e}")
+        raise HTTPException(
+            status_code=409,
+            detail="A user with this email or id already exists"
+        )
     except Exception as e:
         logger.error(f"Error creating user {user_data.user_id}: {e}", exc_info=True)
         raise HTTPException(
