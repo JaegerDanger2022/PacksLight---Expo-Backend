@@ -380,3 +380,90 @@ async def cleanup_old_dreams_array(user_id: str):
     except Exception as e:
         logger.error(f"Error cleaning up user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/backfill-dream-metadata/{user_id}", tags=["migration-temp"])
+async def backfill_dream_metadata(user_id: str):
+    """
+    Copy metadata (score, total_xp) from the users collection embedded dreams
+    into the corresponding dreams collection documents.
+
+    TEMPORARY ENDPOINT - DELETE AFTER BACKFILL IS COMPLETE
+
+    Also copies isComplete, completed_at, status if the dream was completed.
+    """
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        user = await db.users.find_one({"user_id": user_id})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        dreams = user.get("dreams", [])
+        if not dreams:
+            return {"success": True, "message": "No embedded dreams found", "updated": 0}
+
+        updated = 0
+        skipped = 0
+
+        for dream in dreams:
+            thread_id = dream.get("thread_id")
+            if not thread_id:
+                continue
+
+            # Build the fields to copy
+            fields_to_set = {}
+
+            # Copy metadata if present
+            metadata = dream.get("metadata")
+            if metadata:
+                fields_to_set["metadata"] = metadata
+            else:
+                # Compute from milestones if metadata missing on users doc too
+                milestones = dream.get("roadmap", {}).get("milestones", [])
+                total_xp = sum(m.get("xp_points", 0) for m in milestones)
+                score = sum(m.get("xp_points", 0) for m in milestones if m.get("status") == "completed")
+                fields_to_set["metadata"] = {"score": score, "total_xp": total_xp}
+
+            # Copy completion fields
+            if dream.get("isComplete"):
+                fields_to_set["isComplete"] = True
+            if dream.get("completed_at"):
+                fields_to_set["completed_at"] = dream["completed_at"]
+            if dream.get("status"):
+                fields_to_set["status"] = dream["status"]
+            if dream.get("dream_card_bg"):
+                fields_to_set["dream_card_bg"] = dream["dream_card_bg"]
+
+            if not fields_to_set:
+                skipped += 1
+                continue
+
+            result = await db.dreams.update_one(
+                {"thread_id": thread_id},
+                {"$set": fields_to_set}
+            )
+
+            if result.modified_count > 0:
+                updated += 1
+                logger.info(f"[BACKFILL] Updated dream {thread_id}: {fields_to_set}")
+            else:
+                skipped += 1
+                logger.info(f"[BACKFILL] Dream {thread_id} not found in dreams collection or already up to date")
+
+        return {
+            "success": True,
+            "message": "Metadata backfill completed",
+            "user_id": user_id,
+            "updated": updated,
+            "skipped": skipped,
+            "total_dreams": len(dreams)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[BACKFILL] Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
